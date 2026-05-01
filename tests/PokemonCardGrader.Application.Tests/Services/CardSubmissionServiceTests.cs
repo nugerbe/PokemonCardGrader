@@ -612,7 +612,7 @@ public sealed class CardSubmissionServiceTests
         pokemonCardProperty!.SetValue(submission, card);
 
         var cardImage = CardImage.Create(submission.Id, "images/front.jpg", "front.jpg", ImageType.Front, 1024);
-        cardImage.SetAnalysisResult(new ImageAnalysisResult
+        var record = ImageAnalysisRecord.Create(cardImage.Id, new ImageAnalysisResult
         {
             DetectedCentering = CenteringMeasurement.Perfect,
             CornersScore = 9.0,
@@ -621,7 +621,8 @@ public sealed class CardSubmissionServiceTests
             DetectedDefects = [],
             AnalyzedAt = DateTimeOffset.UtcNow,
             AnalysisMethod = "mock"
-        });
+        }, AnalysisRecordSource.Initial);
+        cardImage.LoadAnalysisRecordForTest(record);
         submission.AddImage(cardImage);
 
         _imageStorageService.GetImageUrl("images/front.jpg").Returns("https://storage.test/images/front.jpg");

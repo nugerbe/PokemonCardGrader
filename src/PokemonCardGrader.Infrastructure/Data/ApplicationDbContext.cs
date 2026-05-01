@@ -10,6 +10,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<PokemonCard> PokemonCards => Set<PokemonCard>();
     public DbSet<CardSubmission> CardSubmissions => Set<CardSubmission>();
     public DbSet<CardImage> CardImages => Set<CardImage>();
+    public DbSet<ImageAnalysisRecord> ImageAnalysisRecords => Set<ImageAnalysisRecord>();
     public DbSet<GradeEstimate> GradeEstimates => Set<GradeEstimate>();
     public DbSet<GradingResult> GradingResults => Set<GradingResult>();
     public DbSet<AnalysisCorrection> AnalysisCorrections => Set<AnalysisCorrection>();

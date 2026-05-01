@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging;
 using PokemonCardGrader.Application.DTOs;
 using PokemonCardGrader.Application.Interfaces;
 using PokemonCardGrader.Application.Services;
+using PokemonCardGrader.Domain.Entities;
+using PokemonCardGrader.Domain.Enums;
 using PokemonCardGrader.Domain.ValueObjects;
 
 namespace PokemonCardGrader.Application.Workers;
@@ -97,7 +99,15 @@ public sealed class ImageAnalysisWorker(
                 }
             }
 
-            cardImage.SetAnalysisResult(result);
+            // Append a new analysis record for this image. Append-only: every
+            // analysis run (initial + any subsequent corrections) lives as its
+            // own row; the latest by CreatedAt is the "current" view.
+            var record = ImageAnalysisRecord.Create(
+                cardImage.Id,
+                result,
+                AnalysisRecordSource.Initial);
+            await submissionRepository.AddAnalysisRecordAsync(record, ct);
+
             await submissionRepository.SaveChangesAsync(ct);
         }
 

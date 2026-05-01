@@ -57,6 +57,25 @@ public sealed class ImageAnalysisWorkerTests
         _sut = new ImageAnalysisWorker(_channel, scopeFactory, logger);
     }
 
+    /// <summary>
+    /// Wire <see cref="ICardSubmissionRepository.AddAnalysisRecordAsync"/> on the
+    /// substitute so that any record passed for the supplied image is loaded into
+    /// the image's in-memory navigation collection — mirroring what EF Core does
+    /// when the principal entity is already tracked. Subsequent reads of
+    /// <c>image.LatestAnalysisResult</c> will see the freshly-added record.
+    /// </summary>
+    private void WireAddAnalysisRecordToImage(CardImage image)
+    {
+        _submissionRepository.AddAnalysisRecordAsync(
+                Arg.Do<ImageAnalysisRecord>(r =>
+                {
+                    if (r.CardImageId == image.Id)
+                        image.LoadAnalysisRecordForTest(r);
+                }),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+    }
+
     [Fact]
     public async Task ProcessesImage_PersistsAnalysisResult_OnCardImage()
     {
@@ -90,13 +109,14 @@ public sealed class ImageAnalysisWorkerTests
             .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
-        _submissionRepository.GetAnalyzedImagesBySubmissionAsync(submissionId, Arg.Any<CancellationToken>())
+        _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(new List<CardImage> { cardImage }));
         _submissionRepository.GetByIdInternalAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardSubmission?>(submission));
         _estimationService.EstimateAllCompaniesAsync(
                 submissionId, Arg.Any<ConditionScores>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new List<GradeEstimate>()));
+        WireAddAnalysisRecordToImage(cardImage);
 
         // Act — write request then complete the channel so worker finishes
         await _channel.Writer.WriteAsync(request);
@@ -106,9 +126,15 @@ public sealed class ImageAnalysisWorkerTests
         await _sut.StartAsync(cts.Token);
         await _sut.ExecuteTask!;
 
-        // Assert — analysis result persisted on card image
-        Assert.NotNull(cardImage.AnalysisResult);
-        Assert.Equal("test-analysis", cardImage.AnalysisResult.AnalysisMethod);
+        // Assert — a new analysis record (Source=Initial) was appended for this image
+        await _submissionRepository.Received(1).AddAnalysisRecordAsync(
+            Arg.Is<ImageAnalysisRecord>(r =>
+                r.CardImageId == cardImage.Id &&
+                r.Source == AnalysisRecordSource.Initial &&
+                r.Result.AnalysisMethod == "test-analysis"),
+            Arg.Any<CancellationToken>());
+        Assert.NotNull(cardImage.LatestAnalysisResult);
+        Assert.Equal("test-analysis", cardImage.LatestAnalysisResult!.AnalysisMethod);
         // Scope 1: persist analysis result via SaveChangesAsync
         // Scope 2: estimates inserted via SaveChangesAsync (after DeleteEstimatesAsync + AddEstimatesAsync)
         await _submissionRepository.Received(2).SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -149,14 +175,14 @@ public sealed class ImageAnalysisWorkerTests
             .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
-        _submissionRepository.GetAnalyzedImagesBySubmissionAsync(submissionId, Arg.Any<CancellationToken>())
+        _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(new List<CardImage> { cardImage }));
         _submissionRepository.GetByIdInternalAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardSubmission?>(submission));
         _estimationService.EstimateAllCompaniesAsync(
                 submissionId, Arg.Any<ConditionScores>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new List<GradeEstimate>()));
-
+        WireAddAnalysisRecordToImage(cardImage);
         // Act
         await _channel.Writer.WriteAsync(request);
         _channel.Writer.Complete();
@@ -206,14 +232,14 @@ public sealed class ImageAnalysisWorkerTests
             .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
-        _submissionRepository.GetAnalyzedImagesBySubmissionAsync(submissionId, Arg.Any<CancellationToken>())
+        _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(new List<CardImage> { cardImage }));
         _submissionRepository.GetByIdInternalAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardSubmission?>(submission));
         _estimationService.EstimateAllCompaniesAsync(
                 submissionId, Arg.Any<ConditionScores>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new List<GradeEstimate>()));
-
+        WireAddAnalysisRecordToImage(cardImage);
         // Act
         await _channel.Writer.WriteAsync(request);
         _channel.Writer.Complete();
@@ -223,7 +249,7 @@ public sealed class ImageAnalysisWorkerTests
         await _sut.ExecuteTask!;
 
         // Assert — analysis result saved; scores default to 50/50 centering and 8.0 condition
-        Assert.NotNull(cardImage.AnalysisResult);
+        Assert.NotNull(cardImage.LatestAnalysisResult);
         Assert.NotNull(submission.ImageDerivedScores);
         Assert.Equal(50.0, submission.ImageDerivedScores.Centering!.LeftRightFront);
         Assert.Equal(50.0, submission.ImageDerivedScores.Centering!.TopBottomFront);
@@ -333,14 +359,14 @@ public sealed class ImageAnalysisWorkerTests
             .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
-        _submissionRepository.GetAnalyzedImagesBySubmissionAsync(submissionId, Arg.Any<CancellationToken>())
+        _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(new List<CardImage> { cardImage }));
         _submissionRepository.GetByIdInternalAsync(submissionId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardSubmission?>(submission));
         _estimationService.EstimateAllCompaniesAsync(
                 submissionId, Arg.Any<ConditionScores>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new List<GradeEstimate>()));
-
+        WireAddAnalysisRecordToImage(cardImage);
         // Act
         await _channel.Writer.WriteAsync(request);
         _channel.Writer.Complete();

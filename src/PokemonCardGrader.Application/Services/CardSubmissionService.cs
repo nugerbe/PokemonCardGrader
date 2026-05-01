@@ -121,7 +121,7 @@ public sealed class CardSubmissionService(
     /// </summary>
     public async Task CombineAndSetImageScoresAsync(Guid submissionId, CancellationToken ct = default)
     {
-        var analyzedImages = await submissionRepository.GetAnalyzedImagesBySubmissionAsync(submissionId, ct);
+        var analyzedImages = await submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, ct);
 
         if (analyzedImages.Count == 0)
         {
@@ -132,8 +132,8 @@ public sealed class CardSubmissionService(
         var frontImage = analyzedImages.FirstOrDefault(i => i.ImageType == ImageType.Front);
         var backImage = analyzedImages.FirstOrDefault(i => i.ImageType == ImageType.Back);
 
-        var frontResult = frontImage?.AnalysisResult;
-        var backResult = backImage?.AnalysisResult;
+        var frontResult = frontImage?.LatestAnalysisResult;
+        var backResult = backImage?.LatestAnalysisResult;
 
         // Centering: front image provides LR_Front/TB_Front, back image provides LR_Back/TB_Back
         var lrFront = frontResult?.DetectedCentering?.LeftRightFront ?? 50.0;
@@ -194,29 +194,34 @@ public sealed class CardSubmissionService(
         var submission = await submissionRepository.GetByIdAsync(submissionId, userId, ct)
             ?? throw new InvalidOperationException("Submission not found.");
 
-        // Load the specific image (tracked for update)
-        var image = await submissionRepository.GetImageByIdAsync(correction.CardImageId, ct)
+        // Find the image inside the loaded submission graph (which includes the
+        // latest analysis record per image via filtered include). No need to
+        // separately track CardImage for mutation — we only insert a new
+        // ImageAnalysisRecord row.
+        var image = submission.Images.FirstOrDefault(i => i.Id == correction.CardImageId)
             ?? throw new InvalidOperationException("Image not found.");
 
         if (image.CardSubmissionId != submissionId)
             throw new InvalidOperationException("Image does not belong to this submission.");
 
-        if (image.AnalysisResult is null)
-            throw new InvalidOperationException("Image has not been analyzed yet.");
+        var latestResult = image.LatestAnalysisResult
+            ?? throw new InvalidOperationException("Image has not been analyzed yet.");
 
-        // Capture original state for learning
-        var originalOverlay = image.AnalysisResult.Overlay;
+        // Capture original state for learning (snapshot of the row we're about to supersede)
+        var originalOverlay = latestResult.Overlay;
         var originalScores = submission.ImageDerivedScores;
 
-        // Recalculate scores from the correction
+        // Recalculate scores from the correction. Note: this returns a NEW
+        // ImageAnalysisResult built off the previous one — append-only model
+        // means we never mutate `latestResult`, we just write the new one.
         var updatedResult = imageAnalysisService.RecalculateFromCorrection(
-            image.AnalysisResult, correction);
+            latestResult, correction);
 
-        // Detach/reattach to avoid EF Core __synthesizedOrdinal key error
-        // when DetectedDefects collection shrinks (ordinal positions change).
-        submissionRepository.DetachImage(image);
-        image.SetAnalysisResult(updatedResult);
-        submissionRepository.ReattachImageAsModified(image);
+        var newRecord = ImageAnalysisRecord.Create(
+            image.Id,
+            updatedResult,
+            AnalysisRecordSource.UserCorrection);
+        await submissionRepository.AddAnalysisRecordAsync(newRecord, ct);
 
         await submissionRepository.SaveChangesResolvingConcurrencyAsync(ct);
 
@@ -353,9 +358,9 @@ public sealed class CardSubmissionService(
                     ? null
                     : imageStorageService.GetImageUrl(img.NormalizedStoragePath),
                 ImageType = img.ImageType,
-                IsAnalyzed = img.AnalysisResult is not null,
-                Overlay = img.AnalysisResult?.Overlay,
-                DetectedDefects = img.AnalysisResult?.DetectedDefects,
+                IsAnalyzed = img.LatestAnalysis is not null,
+                Overlay = img.LatestAnalysisResult?.Overlay,
+                DetectedDefects = img.LatestAnalysisResult?.DetectedDefects,
                 UploadedAt = img.UploadedAt
             }).ToList(),
             ActualResult = submission.ActualResult is not null

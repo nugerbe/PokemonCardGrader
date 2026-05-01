@@ -6,4 +6,12 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Test-only helpers (e.g. CardImage.LoadAnalysisRecordForTest) are marked
+         internal so production code cannot accidentally bypass append-only
+         record creation. Test projects pre-populate fixtures via these helpers. -->
+    <InternalsVisibleTo Include="PokemonCardGrader.Application.Tests" />
+    <InternalsVisibleTo Include="PokemonCardGrader.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>

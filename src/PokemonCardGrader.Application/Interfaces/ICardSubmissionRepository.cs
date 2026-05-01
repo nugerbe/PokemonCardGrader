@@ -20,9 +20,25 @@ public interface ICardSubmissionRepository
     Task<CardSubmission> AddAsync(CardSubmission submission, CancellationToken ct = default);
     Task AddImageAsync(CardImage image, CancellationToken ct = default);
     Task<CardImage?> GetImageByIdAsync(Guid imageId, CancellationToken ct = default);
-    void DetachImage(CardImage image);
-    void ReattachImageAsModified(CardImage image);
-    Task<List<CardImage>> GetAnalyzedImagesBySubmissionAsync(Guid submissionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Append a new analysis record for an image. Records are immutable once
+    /// written; corrections add a new row rather than mutating the previous one.
+    /// </summary>
+    Task AddAnalysisRecordAsync(ImageAnalysisRecord record, CancellationToken ct = default);
+
+    /// <summary>
+    /// Latest (by CreatedAt) analysis record for the given image, or null if
+    /// the image has not been analysed yet.
+    /// </summary>
+    Task<ImageAnalysisRecord?> GetLatestAnalysisAsync(Guid cardImageId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Loads each image of the submission with its latest analysis record
+    /// pre-included. Only images that have at least one analysis record are
+    /// returned. Read-only / no-tracking.
+    /// </summary>
+    Task<List<CardImage>> GetImagesWithLatestAnalysisAsync(Guid submissionId, CancellationToken ct = default);
     Task DeleteEstimatesAsync(Guid submissionId, CancellationToken ct = default);
     Task AddEstimatesAsync(IEnumerable<GradeEstimate> estimates, CancellationToken ct = default);
     Task DeleteAsync(CardSubmission submission, CancellationToken ct = default);

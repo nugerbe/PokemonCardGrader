@@ -12,9 +12,14 @@ public sealed class CardSubmissionRepository(
 {
     public async Task<CardSubmission?> GetByIdAsync(Guid id, string userId, CancellationToken ct = default)
     {
+        // Filtered include: each image's AnalysisRecords navigation gets only
+        // the latest record (by CreatedAt). EF Core 7+ supports this and it
+        // keeps the working set small even for images with hundreds of
+        // historical correction rows.
         return await db.CardSubmissions
             .Include(s => s.PokemonCard)
             .Include(s => s.Images)
+                .ThenInclude(i => i.AnalysisRecords.OrderByDescending(r => r.CreatedAt).Take(1))
             .Include(s => s.Estimates)
             .Include(s => s.ActualResult)
             .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
@@ -26,6 +31,7 @@ public sealed class CardSubmissionRepository(
             .AsNoTracking()
             .Include(s => s.PokemonCard)
             .Include(s => s.Images)
+                .ThenInclude(i => i.AnalysisRecords.OrderByDescending(r => r.CreatedAt).Take(1))
             .Include(s => s.Estimates)
             .Include(s => s.ActualResult)
             .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
@@ -93,27 +99,27 @@ public sealed class CardSubmissionRepository(
         return await db.CardImages.FirstOrDefaultAsync(i => i.Id == imageId, ct);
     }
 
-    public void DetachImage(CardImage image)
+    public async Task AddAnalysisRecordAsync(ImageAnalysisRecord record, CancellationToken ct = default)
     {
-        db.Entry(image).State = EntityState.Detached;
+        await db.ImageAnalysisRecords.AddAsync(record, ct);
     }
 
-    public void ReattachImageAsModified(CardImage image)
+    public async Task<ImageAnalysisRecord?> GetLatestAnalysisAsync(Guid cardImageId, CancellationToken ct = default)
     {
-        // db.Update marks the entire entity graph (CardImage + its owned
-        // AnalysisResult) as Modified. Setting State = Modified on the principal
-        // alone is NOT sufficient for owned entities mapped via OwnsOne(...).ToJson():
-        // EF Core only re-serialises the JSON column when the owned entry itself
-        // is in Modified state, so without Update() user corrections to
-        // AnalysisResult silently drop on save.
-        db.CardImages.Update(image);
+        return await db.ImageAnalysisRecords
+            .AsNoTracking()
+            .Where(r => r.CardImageId == cardImageId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(ct);
     }
 
-    public async Task<List<CardImage>> GetAnalyzedImagesBySubmissionAsync(Guid submissionId, CancellationToken ct = default)
+    public async Task<List<CardImage>> GetImagesWithLatestAnalysisAsync(Guid submissionId, CancellationToken ct = default)
     {
         return await db.CardImages
             .AsNoTracking()
-            .Where(i => i.CardSubmissionId == submissionId && i.AnalysisResult != null)
+            .Where(i => i.CardSubmissionId == submissionId
+                        && i.AnalysisRecords.Any())
+            .Include(i => i.AnalysisRecords.OrderByDescending(r => r.CreatedAt).Take(1))
             .ToListAsync(ct);
     }
 
