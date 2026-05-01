@@ -28,6 +28,20 @@ public sealed class CardAnalysisOptions
     /// </summary>
     public int NormalizedImageJpegQuality { get; set; } = 85;
 
+    /// <summary>
+    /// Inset of the card within the rectified output image, as a fraction of
+    /// the output dimensions on each side. Implemented via an "expanded warp"
+    /// in <see cref="ImageAnalysis.CardNormalizer.NormalizeWithExpansion"/>:
+    /// the detected quad maps to a centered inset rectangle inside the W×H
+    /// output, leaving a margin filled with source-image pixels OUTSIDE the
+    /// detected card boundary. This serves two purposes: (1) gives the user
+    /// a visible reference for the actual card edge, and (2) recovers the
+    /// outer card border in cases where detection undershot to the inner
+    /// artwork frame. Default 0.10 = card occupies central 80% of display.
+    /// Analyzer always operates on the unpadded card-tight Mat.
+    /// </summary>
+    public double NormalizedPaddingFraction { get; set; } = 0.10;
+
     /// <summary>Derived aspect ratio (width / height).</summary>
     public double CardAspectRatio => CardWidthMm / CardHeightMm;
 

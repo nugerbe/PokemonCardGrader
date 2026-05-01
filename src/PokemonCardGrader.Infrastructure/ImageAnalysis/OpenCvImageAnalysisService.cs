@@ -180,10 +180,18 @@ public sealed class OpenCvImageAnalysisService(
         // ── Step 7: Build overlay data ──
         var overlay = BuildOverlay(cardQuad, src.Width, src.Height, centeringResult.DetectedBorders);
 
-        // ── Step 7b: Encode the rectified card as JPEG so the worker can persist it.
-        //           This is what the client renders as the primary "centering view"
-        //           — the digital equivalent of laying the card under a Luxiv overlay.
-        var normalizedJpeg = EncodeJpeg(normalized, _opts.NormalizedImageJpegQuality);
+        // ── Step 7b: Encode the rectified card as JPEG for client display.
+        //   The analyzer sees the card-tight rectified Mat above (`normalized`).
+        //   The CLIENT sees an EXPANDED warp where the detected quad maps to an
+        //   inset rectangle inside the output, so the surrounding margin is
+        //   filled with real source-image pixels from outside the detected
+        //   boundary. This recovers the actual card edge whenever detection
+        //   undershoots to the inner artwork frame, and gives the user a clear
+        //   visual reference for "where the card ends" in every case. The
+        //   analyzer is unaffected — it still operates on the tight Mat.
+        using var paddedForDisplay = normalizer.NormalizeWithExpansion(
+            src, cardQuad, _opts.NormalizedPaddingFraction);
+        var normalizedJpeg = EncodeJpeg(paddedForDisplay, _opts.NormalizedImageJpegQuality);
 
         // ── Step 8: Composite debug image ──
         debugViz.DrawComposite(src, cardQuad, normalized, centeringResult.DetectedBorders,
@@ -328,7 +336,7 @@ public sealed class OpenCvImageAnalysisService(
             }
         }
 
-        return new ImageAnalysisResult
+        return CloneIndependent(new ImageAnalysisResult
         {
             DetectedCentering = centering,
             CornersScore = cornersScore,
@@ -352,8 +360,86 @@ public sealed class OpenCvImageAnalysisService(
             Features = original.Features,
             HybridMlUsed = original.HybridMlUsed,
             HybridMlConfidence = original.HybridMlConfidence
-        };
+        });
     }
+
+    /// <summary>
+    /// Deep-clones every nested owned entity in an <see cref="ImageAnalysisResult"/>
+    /// so the returned graph shares NO record-typed instances with the input.
+    ///
+    /// This matters because <see cref="ImageAnalysisRecord"/> rows persist their
+    /// <see cref="ImageAnalysisResult"/> as a JSON column whose nested types are
+    /// EF-owned entities tracked via shadow foreign-keys back to the parent
+    /// record's PK. When a user-correction recalc passes nested objects through
+    /// by reference (e.g. Features = original.Features), the SAME C# instance
+    /// would belong to BOTH the existing Initial-source record (already tracked
+    /// from the loaded submission graph) AND the new UserCorrection-source
+    /// record being inserted. EF's change-tracker can't assign two different
+    /// shadow FKs to one instance and aborts SaveChanges with:
+    ///   "The property 'CardFeatures.ImageAnalysisResultImageAnalysisRecordId'
+    ///    is part of a key and so cannot be modified or marked as modified."
+    /// Cloning makes the contract explicit: every recalc output is structurally
+    /// equivalent to but referentially independent from its input.
+    /// </summary>
+    private static ImageAnalysisResult CloneIndependent(ImageAnalysisResult source) => new()
+    {
+        DetectedCentering = source.DetectedCentering is null ? null : source.DetectedCentering with { },
+        CornersScore = source.CornersScore,
+        EdgesScore = source.EdgesScore,
+        SurfaceScore = source.SurfaceScore,
+        DetectedDefects = source.DetectedDefects.Select(d => d with { }).ToList(),
+        Overlay = source.Overlay is null ? null : new AnalysisOverlay
+        {
+            CardBoundary = source.Overlay.CardBoundary.Select(p => p with { }).ToList(),
+            BorderLines = source.Overlay.BorderLines with { }
+        },
+        AnalyzedAt = source.AnalyzedAt,
+        AnalysisMethod = source.AnalysisMethod,
+        MlDetectedDefects = source.MlDetectedDefects.Select(d => d with { }).ToList(),
+        MlSurfaceScore = source.MlSurfaceScore,
+        DefectModelUsed = source.DefectModelUsed,
+        SurfaceModelUsed = source.SurfaceModelUsed,
+        ImageQualityScore = source.ImageQualityScore,
+        OverallConfidence = source.OverallConfidence,
+        ConfidenceDetail = source.ConfidenceDetail is null ? null : source.ConfidenceDetail with
+        {
+            // List<string> is reference-shared after `with`; rebuild for safety.
+            // (EF won't flag this since strings aren't owned entities, but
+            // keeping the clone semantically deep avoids surprise.)
+        },
+        QualityAssessment = source.QualityAssessment is null ? null : source.QualityAssessment with
+        {
+            Issues = [..source.QualityAssessment.Issues]
+        },
+        FailureDetection = source.FailureDetection is null ? null : source.FailureDetection with { },
+        Regions = source.Regions is null ? null : source.Regions with
+        {
+            BorderRegion = source.Regions.BorderRegion with { },
+            ArtworkRegion = source.Regions.ArtworkRegion with { },
+            TextRegion = source.Regions.TextRegion with { },
+            CornerZones = source.Regions.CornerZones.Select(r => r with { }).ToList(),
+            EdgeZones = source.Regions.EdgeZones.Select(r => r with { }).ToList(),
+            InnerRegion = source.Regions.InnerRegion with { }
+        },
+        Features = source.Features is null ? null : source.Features with
+        {
+            // double[] arrays inside CardFeatures are JSON-serialised inline
+            // and not tracked as owned entities, but cloning them avoids
+            // accidental cross-record mutation if a future stage decides to
+            // tweak them in place.
+            EdgeRoughness = [..source.Features.EdgeRoughness],
+            CornerGeometry = [..source.Features.CornerGeometry],
+            SurfaceVariance = [..source.Features.SurfaceVariance],
+            SurfaceTexture = [..source.Features.SurfaceTexture],
+            ColorHistogram = [..source.Features.ColorHistogram],
+            BorderThickness = [..source.Features.BorderThickness],
+            CenteringDeviation = [..source.Features.CenteringDeviation],
+            CornerWhitening = [..source.Features.CornerWhitening],
+            EdgeWhitening = [..source.Features.EdgeWhitening]
+        },
+        HybridMlUsed = source.HybridMlUsed,
+        HybridMlConfidence = source.HybridMlConfidence
+    };
 
     // ── Private helpers ──
 

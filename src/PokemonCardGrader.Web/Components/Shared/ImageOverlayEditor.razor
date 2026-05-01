@@ -1,7 +1,10 @@
+@using Microsoft.Extensions.Options
+@using PokemonCardGrader.Application.Configuration
 @using PokemonCardGrader.Domain.ValueObjects
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject ILogger<ImageOverlayEditor> Logger
+@inject IOptions<CardAnalysisOptions> AnalysisOptions
 
 <div class="overlay-editor" style="position:relative;display:inline-block;max-width:100%">
     <div style="position:relative">
@@ -195,6 +198,18 @@
         ImmediateMode ||
         InRectifiedMode ||
         (Overlay?.CardBoundary is { Count: 4 } && Overlay.BorderLines is not null);
+
+    /// <summary>
+    /// Inset of the card within the rectified image, as a 0-1 fraction. The
+    /// server builds the rectified image via <c>NormalizeWithExpansion</c>
+    /// which maps the detected quad to a centered inset rectangle — meaning
+    /// the card sits at <c>[NormalizedPaddingFraction, 1 - NormalizedPaddingFraction]</c>
+    /// in display coordinates. The JS overlay's bilinear-quad math uses this
+    /// to draw the inner-border guides at the correct locations and to dim
+    /// the surrounding margin.
+    /// </summary>
+    private double GetRectifiedInset() =>
+        Math.Clamp(AnalysisOptions.Value.NormalizedPaddingFraction, 0.0, 0.45);
 
     private object BuildJsData()
     {
