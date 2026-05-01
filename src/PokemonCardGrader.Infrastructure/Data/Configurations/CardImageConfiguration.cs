@@ -37,10 +37,6 @@ public sealed class CardImageConfiguration : IEntityTypeConfiguration<CardImage>
                 reg.OwnsOne(r => r.InnerRegion);
             });
             ar.OwnsOne(r => r.Features);
-
-            // Transient — used only between analysis and worker persistence.
-            // Excluding from the JSON column avoids ballooning row size with base64.
-            ar.Ignore(r => r.NormalizedImageBytes);
         });
     }
 }

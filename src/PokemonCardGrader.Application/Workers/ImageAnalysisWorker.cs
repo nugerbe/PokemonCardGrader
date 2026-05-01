@@ -54,10 +54,12 @@ public sealed class ImageAnalysisWorker(
                 return;
             }
 
+            ImageAnalysisOutcome outcome;
             await using (imageStream)
             {
-                result = await analysisService.AnalyzeImageAsync(imageStream, request.ImageType, ct);
+                outcome = await analysisService.AnalyzeImageAsync(imageStream, request.ImageType, ct);
             }
+            result = outcome.Result;
 
             logger.LogInformation(
                 "Analysis complete for image {ImageId}. Method: {Method}",
@@ -71,10 +73,10 @@ public sealed class ImageAnalysisWorker(
             }
 
             // Persist the rectified ("Luxiv-flat") view if the analysis produced one.
-            // The path is stored on the entity; the actual JPEG lives alongside
-            // the original upload. Failures here are non-fatal — analysis still
-            // succeeds, the client just falls back to the original photo.
-            if (result.NormalizedImageBytes is { Length: > 0 } bytes)
+            // The bytes travel out-of-band on the outcome so they never hit the
+            // EF JSON column for AnalysisResult. Failures here are non-fatal —
+            // analysis still succeeds, the client just falls back to the original photo.
+            if (outcome.RectifiedImageJpeg is { Length: > 0 } bytes)
             {
                 try
                 {

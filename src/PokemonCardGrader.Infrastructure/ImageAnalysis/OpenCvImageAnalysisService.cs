@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenCvSharp;
 using PokemonCardGrader.Application.Configuration;
+using PokemonCardGrader.Application.DTOs;
 using PokemonCardGrader.Application.Interfaces;
 using PokemonCardGrader.Domain.Enums;
 using PokemonCardGrader.Domain.ValueObjects;
@@ -39,7 +40,7 @@ public sealed class OpenCvImageAnalysisService(
 {
     private readonly CardAnalysisOptions _opts = options.Value;
 
-    public async Task<ImageAnalysisResult> AnalyzeImageAsync(
+    public async Task<ImageAnalysisOutcome> AnalyzeImageAsync(
         Stream imageStream, ImageType imageType = ImageType.Front, CancellationToken ct = default)
     {
         var imageBytes = await ReadStreamAsync(imageStream, ct);
@@ -53,7 +54,7 @@ public sealed class OpenCvImageAnalysisService(
         if (src.Empty())
         {
             logger.LogWarning("Failed to decode image from stream ({ByteCount} bytes).", imageBytes.Length);
-            return CreateEmptyResult();
+            return EmptyOutcome();
         }
 
         logger.LogInformation("Image decoded: {Width}x{Height} pixels.", src.Width, src.Height);
@@ -66,11 +67,11 @@ public sealed class OpenCvImageAnalysisService(
                 "Image quality gate failed (score={Score:F2}): {Action}",
                 qualityAssessment.OverallScore, qualityAssessment.RecommendedAction);
 
-            return CreateEmptyResult() with
+            return EmptyOutcome(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 ImageQualityScore = qualityAssessment.OverallScore
-            };
+            });
         }
 
         // ── Step 1: Detect the card quadrilateral ──
@@ -86,22 +87,22 @@ public sealed class OpenCvImageAnalysisService(
             logger.LogWarning("Blocking failure: {Type} — {Description}",
                 failureResult.FailureType, failureResult.Description);
 
-            return CreateEmptyResult() with
+            return EmptyOutcome(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 FailureDetection = failureResult,
                 ImageQualityScore = qualityAssessment.OverallScore
-            };
+            });
         }
 
         if (detection is null || cardQuad is null)
         {
             logger.LogWarning("Could not detect card quadrilateral in {Width}x{Height} image.", src.Width, src.Height);
-            return CreateEmptyResult() with
+            return EmptyOutcome(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 ImageQualityScore = qualityAssessment.OverallScore
-            };
+            });
         }
 
         // ── Step 2: Perspective-correct to normalized rectangle ──
@@ -219,8 +220,7 @@ public sealed class OpenCvImageAnalysisService(
             Regions = regions,
             Features = features,
             HybridMlUsed = hybridResult.MlAvailable,
-            HybridMlConfidence = hybridResult.MlConfidence,
-            NormalizedImageBytes = normalizedJpeg
+            HybridMlConfidence = hybridResult.MlConfidence
         };
 
         // Log analysis data for future ML training
@@ -233,7 +233,7 @@ public sealed class OpenCvImageAnalysisService(
                 calibratedOverall, submissionId, confidence.Summary);
         }
 
-        return result;
+        return new ImageAnalysisOutcome(result, normalizedJpeg);
     }
 
     /// <summary>
@@ -426,4 +426,10 @@ public sealed class OpenCvImageAnalysisService(
         AnalyzedAt = DateTimeOffset.UtcNow,
         AnalysisMethod = "OpenCV-v4"
     };
+
+    private static ImageAnalysisOutcome EmptyOutcome() =>
+        new(CreateEmptyResult(), null);
+
+    private static ImageAnalysisOutcome EmptyOutcome(ImageAnalysisResult result) =>
+        new(result, null);
 }

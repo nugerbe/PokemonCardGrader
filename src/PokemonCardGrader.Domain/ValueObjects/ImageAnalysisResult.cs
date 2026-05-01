@@ -55,12 +55,4 @@ public sealed record ImageAnalysisResult
 
     /// <summary>ML confidence from hybrid combiner (Phase 15).</summary>
     public double? HybridMlConfidence { get; init; }
-
-    /// <summary>
-    /// Perspective-corrected card image as JPEG bytes. Transient (not persisted to the
-    /// EF JSON column — EF is configured to ignore this). Used by the worker to write
-    /// the rectified image to storage and record the path on <c>CardImage</c>. Null
-    /// when analysis failed or no card quad was detected.
-    /// </summary>
-    public byte[]? NormalizedImageBytes { get; init; }
 }

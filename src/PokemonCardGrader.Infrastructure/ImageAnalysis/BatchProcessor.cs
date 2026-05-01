@@ -62,10 +62,13 @@ public sealed class BatchProcessor(
                 {
                     try
                     {
-                        var result = await analysisService.AnalyzeImageAsync(
+                        var outcome = await analysisService.AnalyzeImageAsync(
                             item.ImageStream, item.ImageType, ct);
+                        // Batch path discards the rectified JPEG — only the
+                        // worker pipeline persists it (we'd need a CardImageId
+                        // to associate it with).
                         await resultChannel.Writer.WriteAsync(
-                            new BatchResult(item.Id, result, null), ct);
+                            new BatchResult(item.Id, outcome.Result, null), ct);
                     }
                     catch (OperationCanceledException)
                     {

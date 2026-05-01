@@ -84,7 +84,8 @@ public static class GradingEndpoints
         try
         {
             await using var stream = file.OpenReadStream();
-            var result = await analysisService.AnalyzeImageAsync(stream, type);
+            var outcome = await analysisService.AnalyzeImageAsync(stream, type);
+            var result = outcome.Result;
 
             var response = new AnalysisResponse(
                 SubmissionId: Guid.NewGuid(),

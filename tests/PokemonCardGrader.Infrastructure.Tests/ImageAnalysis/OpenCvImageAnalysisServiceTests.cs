@@ -78,7 +78,7 @@ public sealed class OpenCvImageAnalysisServiceTests
         using var imageStream = stream;
 
         // Act
-        var result = await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None);
+        var result = (await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None)).Result;
 
         // Assert
         Assert.NotNull(result.DetectedCentering);
@@ -100,7 +100,7 @@ public sealed class OpenCvImageAnalysisServiceTests
         using var imageStream = stream;
 
         // Act
-        var result = await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None);
+        var result = (await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None)).Result;
 
         // Assert
         Assert.NotNull(result.Overlay);
@@ -127,7 +127,7 @@ public sealed class OpenCvImageAnalysisServiceTests
         using var imageStream = stream;
 
         // Act
-        var result = await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None);
+        var result = (await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None)).Result;
 
         // Assert
         Assert.NotNull(result.CornersScore);
