@@ -1,0 +1,110 @@
+@* Reusable condition score input form with sliders *@
+
+<div class="condition-score-form">
+    <h5>Centering Measurements</h5>
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Left/Right Front: @LeftRightFront.ToString("F1")%</label>
+            <input type="range" class="form-range" min="30" max="70" step="0.5"
+                   value="@LeftRightFront" @oninput="e => UpdateCentering(nameof(LeftRightFront), e)" />
+            <small class="text-muted">@LeftRightFront.ToString("F1") / @((100 - LeftRightFront).ToString("F1"))</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Top/Bottom Front: @TopBottomFront.ToString("F1")%</label>
+            <input type="range" class="form-range" min="30" max="70" step="0.5"
+                   value="@TopBottomFront" @oninput="e => UpdateCentering(nameof(TopBottomFront), e)" />
+            <small class="text-muted">@TopBottomFront.ToString("F1") / @((100 - TopBottomFront).ToString("F1"))</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Left/Right Back: @LeftRightBack.ToString("F1")%</label>
+            <input type="range" class="form-range" min="30" max="70" step="0.5"
+                   value="@LeftRightBack" @oninput="e => UpdateCentering(nameof(LeftRightBack), e)" />
+            <small class="text-muted">@LeftRightBack.ToString("F1") / @((100 - LeftRightBack).ToString("F1"))</small>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Top/Bottom Back: @TopBottomBack.ToString("F1")%</label>
+            <input type="range" class="form-range" min="30" max="70" step="0.5"
+                   value="@TopBottomBack" @oninput="e => UpdateCentering(nameof(TopBottomBack), e)" />
+            <small class="text-muted">@TopBottomBack.ToString("F1") / @((100 - TopBottomBack).ToString("F1"))</small>
+        </div>
+    </div>
+
+    <h5>Physical Condition</h5>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Corners: @Corners.ToString("F1")</label>
+            <input type="range" class="form-range" min="1" max="10" step="0.5"
+                   value="@Corners" @oninput="e => UpdateScore(nameof(Corners), e)" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Edges: @Edges.ToString("F1")</label>
+            <input type="range" class="form-range" min="1" max="10" step="0.5"
+                   value="@Edges" @oninput="e => UpdateScore(nameof(Edges), e)" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Surface: @Surface.ToString("F1")</label>
+            <input type="range" class="form-range" min="1" max="10" step="0.5"
+                   value="@Surface" @oninput="e => UpdateScore(nameof(Surface), e)" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public double LeftRightFront { get; set; } = 50;
+    [Parameter] public double TopBottomFront { get; set; } = 50;
+    [Parameter] public double LeftRightBack { get; set; } = 50;
+    [Parameter] public double TopBottomBack { get; set; } = 50;
+    [Parameter] public double Corners { get; set; } = 8.0;
+    [Parameter] public double Edges { get; set; } = 8.0;
+    [Parameter] public double Surface { get; set; } = 8.0;
+    [Parameter] public EventCallback<ConditionScores> OnScoresChanged { get; set; }
+
+    private void UpdateCentering(string field, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var value))
+        {
+            switch (field)
+            {
+                case nameof(LeftRightFront): LeftRightFront = value; break;
+                case nameof(TopBottomFront): TopBottomFront = value; break;
+                case nameof(LeftRightBack): LeftRightBack = value; break;
+                case nameof(TopBottomBack): TopBottomBack = value; break;
+            }
+            NotifyChanged();
+        }
+    }
+
+    private void UpdateScore(string field, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var value))
+        {
+            switch (field)
+            {
+                case nameof(Corners): Corners = value; break;
+                case nameof(Edges): Edges = value; break;
+                case nameof(Surface): Surface = value; break;
+            }
+            NotifyChanged();
+        }
+    }
+
+    private void NotifyChanged()
+    {
+        var scores = BuildScores();
+        OnScoresChanged.InvokeAsync(scores);
+    }
+
+    public ConditionScores BuildScores() => new()
+    {
+        Centering = new CenteringMeasurement
+        {
+            LeftRightFront = LeftRightFront,
+            TopBottomFront = TopBottomFront,
+            LeftRightBack = LeftRightBack,
+            TopBottomBack = TopBottomBack
+        },
+        Corners = Corners,
+        Edges = Edges,
+        Surface = Surface
+    };
+}

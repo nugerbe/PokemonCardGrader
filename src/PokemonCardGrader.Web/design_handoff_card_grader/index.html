@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Calibra — Card Grading Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Fraunces:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="data.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="components/shell.jsx"></script>
+  <script type="text/babel" src="components/dashboard.jsx"></script>
+  <script type="text/babel" src="components/collection.jsx"></script>
+  <script type="text/babel" src="components/new_submission.jsx"></script>
+  <script type="text/babel" src="components/submission_detail.jsx"></script>
+
+  <script type="text/babel">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "accent": "mustard",
+      "density": "comfortable",
+      "showTweaks": false
+    }/*EDITMODE-END*/;
+
+    const ACCENTS = {
+      mustard: { '--accent': 'oklch(0.78 0.13 85)', '--accent-ink': 'oklch(0.28 0.06 85)', '--accent-soft': 'oklch(0.94 0.05 85)' },
+      indigo:  { '--accent': 'oklch(0.62 0.16 265)', '--accent-ink': 'oklch(0.26 0.1 265)', '--accent-soft': 'oklch(0.94 0.04 265)' },
+      rose:    { '--accent': 'oklch(0.68 0.15 20)', '--accent-ink': 'oklch(0.28 0.1 20)', '--accent-soft': 'oklch(0.94 0.05 20)' },
+      sage:    { '--accent': 'oklch(0.72 0.1 150)', '--accent-ink': 'oklch(0.28 0.07 150)', '--accent-soft': 'oklch(0.94 0.04 150)' },
+    };
+
+    function App() {
+      const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+      const [tweaksOn, setTweaksOn] = React.useState(false);
+      const [page, setPage] = React.useState(() => localStorage.getItem('cg:page') || 'dashboard');
+      const [subId, setSubId] = React.useState(null);
+
+      React.useEffect(() => { localStorage.setItem('cg:page', page); }, [page]);
+
+      React.useEffect(() => {
+        const accent = ACCENTS[tweaks.accent] || ACCENTS.mustard;
+        Object.entries(accent).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
+      }, [tweaks.accent]);
+
+      React.useEffect(() => {
+        const handler = (e) => {
+          if (e.data?.type === '__activate_edit_mode') setTweaksOn(true);
+          if (e.data?.type === '__deactivate_edit_mode') setTweaksOn(false);
+        };
+        window.addEventListener('message', handler);
+        window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+        return () => window.removeEventListener('message', handler);
+      }, []);
+
+      const setTweak = (k, v) => {
+        setTweaks(t => ({ ...t, [k]: v }));
+        window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
+      };
+
+      const goto = (p, id = null) => {
+        setPage(p);
+        if (id) setSubId(id);
+        document.querySelector('.main')?.scrollTo({ top: 0 });
+      };
+
+      const counts = { collection: 58, submissions: 73, graded: 27 };
+      const crumbs = {
+        dashboard:   ['Calibra', 'Overview'],
+        collection:  ['Calibra', 'Collection'],
+        submissions: ['Calibra', 'Submissions'],
+        new:         ['Calibra', 'Collection', 'New submission'],
+        detail:      ['Calibra', 'Collection', 'Submission'],
+        search:      ['Calibra', 'Card catalog'],
+        graded:      ['Calibra', 'Graded archive'],
+      }[page] || ['Calibra'];
+
+      let content;
+      if (page === 'dashboard') content = <Dashboard goto={goto} />;
+      else if (page === 'collection' || page === 'submissions' || page === 'graded' || page === 'search')
+        content = <Collection goto={goto} />;
+      else if (page === 'new') content = <NewSubmission goto={goto} />;
+      else if (page === 'detail') content = <SubmissionDetail subId={subId} goto={goto} />;
+
+      return (
+        <div className="app" data-screen-label={page}>
+          <Sidebar current={page} setCurrent={goto} counts={counts} />
+          <div className="main">
+            <Topbar crumbs={crumbs}
+              right={page === 'dashboard' ? (
+                <button className="btn btn-primary" onClick={() => goto('new')}>
+                  <Icon name="plus" size={14} /> New submission
+                </button>
+              ) : null}
+            />
+            {content}
+          </div>
+
+          <div className={`tweaks ${tweaksOn ? 'open' : ''}`}>
+            <h4><Icon name="tweaks" size={14}/> Tweaks</h4>
+            <div className="tweak-row">
+              <label>Accent</label>
+              <div className="swatch-row">
+                {Object.keys(ACCENTS).map(k => (
+                  <button key={k} className={`swatch ${tweaks.accent === k ? 'active' : ''}`}
+                    onClick={() => setTweak('accent', k)}
+                    style={{ background: ACCENTS[k]['--accent'] }} title={k} />
+                ))}
+              </div>
+            </div>
+            <div className="tweak-row">
+              <label>Jump to</label>
+              <div className="tweak-btns">
+                {[
+                  ['dashboard', 'Home'],
+                  ['collection', 'Cards'],
+                  ['new', 'New'],
+                  ['detail', 'Detail'],
+                ].map(([k, l]) => (
+                  <button key={k} className={`tweak-btn ${page === k ? 'active' : ''}`}
+                    onClick={() => goto(k, SAMPLE_SUBMISSIONS[0].id)}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div className="tweak-row" style={{ borderTop: '1px solid var(--rule)', paddingTop: 10, marginTop: 4 }}>
+              <div style={{ fontSize: 10.5, color: 'var(--ink-4)', lineHeight: 1.4 }}>
+                Calibra is an original concept redesign. All card artwork is generic placeholder.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

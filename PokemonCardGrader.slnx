@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PokemonCardGrader.Application/PokemonCardGrader.Application.csproj" />
+    <Project Path="src/PokemonCardGrader.Domain/PokemonCardGrader.Domain.csproj" />
+    <Project Path="src/PokemonCardGrader.Infrastructure/PokemonCardGrader.Infrastructure.csproj" />
+    <Project Path="src/PokemonCardGrader.Web/PokemonCardGrader.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PokemonCardGrader.Application.Tests/PokemonCardGrader.Application.Tests.csproj" />
+    <Project Path="tests/PokemonCardGrader.Domain.Tests/PokemonCardGrader.Domain.Tests.csproj" />
+    <Project Path="tests/PokemonCardGrader.Infrastructure.Tests/PokemonCardGrader.Infrastructure.Tests.csproj" />
+    <Project Path="tests/PokemonCardGrader.Web.Tests/PokemonCardGrader.Web.Tests.csproj" />
+  </Folder>
+</Solution>

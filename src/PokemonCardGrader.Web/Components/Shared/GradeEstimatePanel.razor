@@ -1,0 +1,73 @@
+@* Displays grade estimates from all 6 companies *@
+
+@if (Estimates is null || Estimates.Count == 0)
+{
+    <div class="alert alert-info">No grade estimates available. Submit scores to see estimates.</div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var estimate in Estimates.OrderBy(e => e.Company))
+        {
+            <div class="col-md-4 col-lg-2">
+                <GradeCompanyBadge Estimate="estimate" />
+            </div>
+        }
+    </div>
+
+    <div class="mt-3">
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Grade</th>
+                    <th>Label</th>
+                    <th>Confidence</th>
+                    <th>Method</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var estimate in Estimates.OrderBy(e => e.Company))
+                {
+                    <tr>
+                        <td><strong>@estimate.Company</strong></td>
+                        <td>@estimate.PredictedGrade.ToString("F1")</td>
+                        <td>@estimate.Label</td>
+                        <td>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar @GetConfidenceClass(estimate.Confidence)"
+                                     style="width: @((estimate.Confidence * 100).ToString("F0"))%">
+                                    @((estimate.Confidence * 100).ToString("F0"))%
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge @(estimate.IsRuleBased ? "bg-secondary" : "bg-info")">
+                                @(estimate.IsRuleBased ? "Rule-Based" : "ML")
+                            </span>
+                        </td>
+                    </tr>
+                    @if (estimate.SubGrades.Count > 0)
+                    {
+                        <tr>
+                            <td colspan="5" class="ps-4">
+                                <SubGradeBreakdown SubGrades="estimate.SubGrades" Company="estimate.Company" />
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public List<GradeEstimateDto> Estimates { get; set; } = [];
+
+    private static string GetConfidenceClass(double confidence) => confidence switch
+    {
+        >= 0.8 => "bg-success",
+        >= 0.6 => "bg-warning",
+        _ => "bg-danger"
+    };
+}

@@ -1,0 +1,234 @@
+@page "/dashboard"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using PokemonCardGrader.Application.DTOs
+@using PokemonCardGrader.Application.Services
+@inject DashboardService DashboardService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Overview - Calibra</PageTitle>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert-box danger">@_errorMessage</div>
+}
+else if (_dashboard is null)
+{
+    <div class="page-content">
+        <h1 class="display">Overview</h1>
+        <p class="page-sub">Loading dashboard...</p>
+    </div>
+}
+else
+{
+    <h1 class="display">Overview</h1>
+    <p class="page-sub">At-a-glance performance across all your submissions.</p>
+
+    @* Top stat row *@
+    <div class="stat-grid">
+        <div class="surface stat">
+            <span class="label">Submissions</span>
+            <span class="val num">@_dashboard.TotalSubmissions</span>
+        </div>
+        <div class="surface stat">
+            <span class="label">Graded</span>
+            <span class="val num">@_dashboard.GradedCards</span>
+            @if (_dashboard.TotalSubmissions > 0)
+            {
+                <span class="delta">@(Math.Round((double)_dashboard.GradedCards / _dashboard.TotalSubmissions * 100))% of submissions</span>
+            }
+        </div>
+        <div class="surface stat accent">
+            <span class="label">Avg estimated grade</span>
+            <span class="val num">@(_dashboard.AverageEstimatedGrade?.ToString("F1") ?? "—")</span>
+        </div>
+        <div class="surface stat">
+            <span class="label">Cards graded</span>
+            <span class="val num">@_dashboard.GradedCards</span>
+        </div>
+    </div>
+
+    @* Grade distribution + calibration row *@
+    @if (_dashboard.GradeDistribution.Count > 0)
+    {
+        <div class="dash-row">
+            @* Distribution chart *@
+            <div class="surface">
+                <div class="surface-h">
+                    <h3>Grade distribution</h3>
+                    <span class="chip">PSA estimates</span>
+                </div>
+                <div class="surface-b">
+                    <div class="chart-bars">
+                        @{
+                            var maxCount = _dashboard.GradeDistribution.Values.DefaultIfEmpty(1).Max();
+                            var orderedGrades = _dashboard.GradeDistribution.OrderBy(kv => kv.Key).ToList();
+                        }
+                        @foreach (var entry in orderedGrades)
+                        {
+                            var pct = maxCount > 0 ? (int)(entry.Value * 100.0 / maxCount) : 0;
+                            var isTop = entry.Value == maxCount;
+                            <div class="bar-col">
+                                <span class="bar-val mono">@entry.Value</span>
+                                <div class="bar @(isTop ? "bar-dark" : "")" style="height: @(pct)%"></div>
+                                <span class="bar-label">@entry.Key</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @* Calibration panel *@
+            <div class="surface">
+                <div class="surface-h">
+                    <h3>Estimate vs actual</h3>
+                    @if (_dashboard.GradedCards > 0)
+                    {
+                        <span class="chip sage dot">Calibrated</span>
+                    }
+                </div>
+                <div class="surface-b">
+                    @if (_dashboard.GradedCards == 0)
+                    {
+                        <p style="color:var(--ink-3);font-size:13px">Grade some cards to see calibration data.</p>
+                    }
+                    else
+                    {
+                        @foreach (var sub in _dashboard.RecentSubmissions.Where(s => s.ActualResult is not null && s.Estimates.Count > 0).Take(4))
+                        {
+                            var topEst = sub.Estimates.OrderByDescending(e => e.Confidence).First();
+                            var actual = sub.ActualResult!;
+                            <div class="calibration-row">
+                                <div class="calibration-meta">
+                                    <span style="color:var(--ink-2);font-weight:500">@sub.CardName</span>
+                                    <span class="mono" style="color:var(--ink-3)">est @topEst.PredictedGrade.ToString("F1") · act @actual.ActualGrade.ToString("F1")</span>
+                                </div>
+                                <div class="calibration-bar">
+                                    <div class="calibration-fill" style="width:@(topEst.PredictedGrade * 10)%"></div>
+                                    <div class="calibration-marker" style="left:@(actual.ActualGrade * 10)%"></div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Recent submissions table *@
+    <div class="surface">
+        <div class="surface-h">
+            <h3>Recent submissions</h3>
+            <a href="submissions" class="btn btn-ghost" style="margin-left:auto;padding:4px 10px;font-size:11px">
+                View all
+                <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-left:4px">
+                    <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+                </svg>
+            </a>
+        </div>
+        @if (_dashboard.RecentSubmissions.Count == 0)
+        {
+            <div class="surface-b" style="text-align:center;padding:40px 20px">
+                <p style="color:var(--ink-3);font-size:13px">No submissions yet. <a href="cards/search">Search for a card</a> to get started.</p>
+            </div>
+        }
+        else
+        {
+            <table class="clean">
+                <thead>
+                    <tr>
+                        <th>Card</th>
+                        <th>Set</th>
+                        <th>Submitted</th>
+                        <th>Top estimate</th>
+                        <th>Actual</th>
+                        <th style="width:40px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var sub in _dashboard.RecentSubmissions.Take(5))
+                    {
+                        var topEstimate = sub.Estimates
+                            .OrderByDescending(e => e.Confidence)
+                            .FirstOrDefault();
+
+                        <tr @onclick="() => NavigationManager.NavigateTo(GetSubmissionUrl(sub.Id))" style="cursor:pointer">
+                            <td>
+                                <div style="display:flex;align-items:center;gap:12px">
+                                    <div>
+                                        <div style="font-weight:500">@sub.CardName</div>
+                                        <div class="mono" style="font-size:11px;color:var(--ink-4)">#@sub.Number</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>@sub.SetName</td>
+                            <td><span class="mono" style="color:var(--ink-3)">@sub.CreatedAt.LocalDateTime.ToString("MMM dd")</span></td>
+                            <td>
+                                @if (topEstimate is not null)
+                                {
+                                    <div style="display:flex;align-items:center;gap:8px">
+                                        <span class="mono" style="font-size:11px;color:var(--ink-3)">@topEstimate.Company</span>
+                                        <span style="font-family:var(--sans);font-weight:500;font-size:16px;letter-spacing:-0.02em">@topEstimate.PredictedGrade.ToString("F1")</span>
+                                        <span class="chip" style="font-size:10px">@(Math.Round(topEstimate.Confidence * 100))%</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span style="color:var(--ink-4);font-size:12px">Pending</span>
+                                }
+                            </td>
+                            <td>
+                                @if (sub.ActualResult is not null)
+                                {
+                                    <span class="chip sage dot">@sub.ActualResult.Company @sub.ActualResult.ActualGrade</span>
+                                }
+                                else
+                                {
+                                    <span style="color:var(--ink-4);font-size:12px">—</span>
+                                }
+                            </td>
+                            <td>
+                                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;color:var(--ink-4)">
+                                    <path d="m9 6 6 6-6 6"/>
+                                </svg>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private DashboardDto? _dashboard;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var user = (await AuthState).User;
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                _errorMessage = "Unable to identify the current user.";
+                return;
+            }
+
+            _dashboard = await DashboardService.GetDashboardAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load dashboard: {ex.Message}";
+        }
+    }
+
+    private string GetSubmissionUrl(Guid id) => $"submissions/{id}";
+}

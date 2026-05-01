@@ -1,0 +1,33 @@
+@* Color-coded grade badge for a single company *@
+
+<div class="card text-center h-100 @GetBorderClass()">
+    <div class="card-body p-2">
+        <h6 class="card-title mb-1">@Estimate.Company</h6>
+        <div class="display-6 fw-bold @GetTextClass()">
+            @Estimate.PredictedGrade.ToString("F1")
+        </div>
+        <small class="text-muted">@Estimate.Label</small>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public GradeEstimateDto Estimate { get; set; } = null!;
+
+    private string GetBorderClass() => Estimate.PredictedGrade switch
+    {
+        >= 9.5 => "border-warning",   // Gold - Gem Mint/Perfect
+        >= 8.5 => "border-success",   // Green - Mint/Near Mint
+        >= 7.0 => "border-primary",   // Blue - Excellent
+        >= 5.0 => "border-info",      // Light blue - Very Good
+        _ => "border-danger"           // Red - Below average
+    };
+
+    private string GetTextClass() => Estimate.PredictedGrade switch
+    {
+        >= 9.5 => "text-warning",
+        >= 8.5 => "text-success",
+        >= 7.0 => "text-primary",
+        >= 5.0 => "text-info",
+        _ => "text-danger"
+    };
+}

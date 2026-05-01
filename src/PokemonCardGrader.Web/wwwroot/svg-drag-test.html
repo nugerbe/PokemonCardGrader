@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SVG Drag Test — Isolated</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+        .container { display: flex; gap: 20px; align-items: flex-start; }
+        .svg-wrap { position: relative; width: 400px; height: 560px; border: 1px solid #444; }
+        .svg-wrap img { width: 100%; height: 100%; display: block; }
+        .svg-wrap svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #log { width: 400px; height: 560px; overflow-y: auto; background: #111; padding: 10px; font-size: 11px; border: 1px solid #444; }
+        .log-border { color: #60a5fa; }
+        .log-corner { color: #4ade80; }
+        .log-error { color: #f87171; }
+        h3 { margin: 0 0 10px; }
+    </style>
+</head>
+<body>
+    <h2>SVG Drag Test — Isolated from Blazor</h2>
+    <p>Try dragging the <span style="color:#60a5fa">blue border lines</span> and <span style="color:#4ade80">green corner circles</span>.</p>
+    <p>If borders can't be dragged, the SVG pointer-events pattern is broken in this browser.</p>
+    <div class="container">
+        <div class="svg-wrap">
+            <!-- Gray placeholder instead of real card image -->
+            <div style="width:100%;height:100%;background:#333"></div>
+            <svg viewBox="0 0 1000 1000" preserveAspectRatio="none"
+                 style="position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none;user-select:none">
+
+                <!-- Card boundary polygon -->
+                <polygon points="100,80 900,80 900,920 100,920"
+                         fill="none" stroke="#4ade80" stroke-width="2" stroke-dasharray="6,3"
+                         opacity="0.85" style="pointer-events:none" />
+
+                <!-- Visible border lines (non-interactive, just visual) -->
+                <line x1="200" y1="80" x2="200" y2="920"
+                      stroke="#60a5fa" stroke-width="2" opacity="0.8" style="pointer-events:none"
+                      data-border-visible="0" />
+                <line x1="800" y1="80" x2="800" y2="920"
+                      stroke="#60a5fa" stroke-width="2" opacity="0.8" style="pointer-events:none"
+                      data-border-visible="1" />
+                <line x1="100" y1="200" x2="900" y2="200"
+                      stroke="#60a5fa" stroke-width="2" opacity="0.8" style="pointer-events:none"
+                      data-border-visible="2" />
+                <line x1="100" y1="800" x2="900" y2="800"
+                      stroke="#60a5fa" stroke-width="2" opacity="0.8" style="pointer-events:none"
+                      data-border-visible="3" />
+
+                <!-- BORDER HIT TARGETS: thick invisible lines -->
+                <!-- Test 3 approaches side by side to see which ones actually receive events -->
+
+                <!-- Approach: stroke="transparent" pointer-events="stroke" -->
+                <line x1="200" y1="80" x2="200" y2="920"
+                      stroke="transparent" stroke-width="24" pointer-events="stroke"
+                      style="cursor:ew-resize"
+                      data-drag-type="border" data-drag-index="0" data-border-hit="0" />
+                <line x1="800" y1="80" x2="800" y2="920"
+                      stroke="transparent" stroke-width="24" pointer-events="stroke"
+                      style="cursor:ew-resize"
+                      data-drag-type="border" data-drag-index="1" data-border-hit="1" />
+                <line x1="100" y1="200" x2="900" y2="200"
+                      stroke="transparent" stroke-width="24" pointer-events="stroke"
+                      style="cursor:ns-resize"
+                      data-drag-type="border" data-drag-index="2" data-border-hit="2" />
+                <line x1="100" y1="800" x2="900" y2="800"
+                      stroke="transparent" stroke-width="24" pointer-events="stroke"
+                      style="cursor:ns-resize"
+                      data-drag-type="border" data-drag-index="3" data-border-hit="3" />
+
+                <!-- Corner circles (rendered LAST = topmost z-order) -->
+                <circle cx="100" cy="80" r="14"
+                        fill="#4ade80" fill-opacity="0.4" stroke="#4ade80" stroke-width="2.5"
+                        pointer-events="all" style="cursor:grab"
+                        data-drag-type="corner" data-drag-index="0" data-corner-index="0" />
+                <circle cx="900" cy="80" r="14"
+                        fill="#4ade80" fill-opacity="0.4" stroke="#4ade80" stroke-width="2.5"
+                        pointer-events="all" style="cursor:grab"
+                        data-drag-type="corner" data-drag-index="1" data-corner-index="1" />
+                <circle cx="900" cy="920" r="14"
+                        fill="#4ade80" fill-opacity="0.4" stroke="#4ade80" stroke-width="2.5"
+                        pointer-events="all" style="cursor:grab"
+                        data-drag-type="corner" data-drag-index="2" data-corner-index="2" />
+                <circle cx="100" cy="920" r="14"
+                        fill="#4ade80" fill-opacity="0.4" stroke="#4ade80" stroke-width="2.5"
+                        pointer-events="all" style="cursor:grab"
+                        data-drag-type="corner" data-drag-index="3" data-corner-index="3" />
+            </svg>
+        </div>
+        <div>
+            <h3>Event Log</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        var logEl = document.getElementById('log');
+        function log(msg, cls) {
+            var div = document.createElement('div');
+            div.className = cls || '';
+            div.textContent = (new Date()).toISOString().substr(11, 12) + ' ' + msg;
+            logEl.prepend(div);
+        }
+
+        var svg = document.querySelector('svg');
+
+        // Exactly the same pattern as overlay-editor.js
+        function toSvgCoords(svgEl, e) {
+            var pt = svgEl.createSVGPoint();
+            pt.x = e.clientX;
+            pt.y = e.clientY;
+            var ctm = svgEl.getScreenCTM();
+            if (!ctm) return { x: 0, y: 0 };
+            var svgPt = pt.matrixTransform(ctm.inverse());
+            return { x: svgPt.x, y: svgPt.y };
+        }
+
+        var drag = null;
+
+        function onPointerMove(e) {
+            if (!drag) return;
+            e.preventDefault();
+            var coords = toSvgCoords(svg, e);
+
+            if (drag.type === 'border') {
+                var idx = drag.index;
+                var visible = svg.querySelector('[data-border-visible="' + idx + '"]');
+                var hit = svg.querySelector('[data-border-hit="' + idx + '"]');
+                if (idx < 2) {
+                    // Vertical line
+                    if (visible) { visible.setAttribute('x1', coords.x); visible.setAttribute('x2', coords.x); }
+                    if (hit) { hit.setAttribute('x1', coords.x); hit.setAttribute('x2', coords.x); }
+                } else {
+                    // Horizontal line
+                    if (visible) { visible.setAttribute('y1', coords.y); visible.setAttribute('y2', coords.y); }
+                    if (hit) { hit.setAttribute('y1', coords.y); hit.setAttribute('y2', coords.y); }
+                }
+            } else if (drag.type === 'corner') {
+                var circle = svg.querySelector('[data-corner-index="' + drag.index + '"]');
+                if (circle) { circle.setAttribute('cx', coords.x); circle.setAttribute('cy', coords.y); }
+                // Update polygon
+                var polys = svg.querySelectorAll('polygon');
+                var coord = coords.x.toFixed(1) + ',' + coords.y.toFixed(1);
+                polys.forEach(function(p) {
+                    var pts = p.getAttribute('points').split(' ');
+                    if (drag.index < pts.length) { pts[drag.index] = coord; p.setAttribute('points', pts.join(' ')); }
+                });
+            }
+        }
+
+        function onPointerUp(e) {
+            if (!drag) return;
+            e.preventDefault();
+            var coords = toSvgCoords(svg, e);
+
+            var element = drag.element;
+            element.removeEventListener('pointermove', onPointerMove);
+            element.removeEventListener('pointerup', onPointerUp);
+            element.removeEventListener('pointercancel', onPointerCancel);
+            try { element.releasePointerCapture(e.pointerId); } catch(ex) {}
+
+            if (drag.type === 'border') {
+                log('BORDER drag END index=' + drag.index + ' at (' + coords.x.toFixed(1) + ',' + coords.y.toFixed(1) + ')', 'log-border');
+            } else {
+                log('CORNER drag END index=' + drag.index + ' at (' + coords.x.toFixed(1) + ',' + coords.y.toFixed(1) + ')', 'log-corner');
+            }
+            drag = null;
+        }
+
+        function onPointerCancel(e) {
+            if (!drag) return;
+            var element = drag.element;
+            element.removeEventListener('pointermove', onPointerMove);
+            element.removeEventListener('pointerup', onPointerUp);
+            element.removeEventListener('pointercancel', onPointerCancel);
+            try { element.releasePointerCapture(e.pointerId); } catch(ex) {}
+            log('Drag CANCELLED', 'log-error');
+            drag = null;
+        }
+
+        // Attach per-element pointerdown
+        var draggables = svg.querySelectorAll('[data-drag-type]');
+        log('Found ' + draggables.length + ' draggable elements');
+        draggables.forEach(function(el) {
+            var type = el.getAttribute('data-drag-type');
+            var index = el.getAttribute('data-drag-index');
+            log('  Attached pointerdown to ' + type + '[' + index + '] (' + el.tagName + ')');
+
+            el.addEventListener('pointerdown', function(e) {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+
+                drag = { type: type, index: parseInt(index), element: el };
+                el.setPointerCapture(e.pointerId);
+                el.addEventListener('pointermove', onPointerMove);
+                el.addEventListener('pointerup', onPointerUp);
+                el.addEventListener('pointercancel', onPointerCancel);
+
+                var cls = type === 'border' ? 'log-border' : 'log-corner';
+                log(type.toUpperCase() + ' drag START index=' + index, cls);
+            });
+        });
+
+        log('--- Test ready. Drag lines and circles. ---');
+
+        // Also log raw pointerdown on the SVG to see what gets hit
+        svg.addEventListener('pointerdown', function(e) {
+            var target = e.target;
+            var dragType = target.getAttribute('data-drag-type');
+            log('SVG pointerdown on <' + target.tagName + '> dragType=' + dragType +
+                ' pointerEvents=' + getComputedStyle(target).pointerEvents +
+                ' stroke=' + (target.getAttribute('stroke') || 'n/a'));
+        }, true); // capture phase
+    </script>
+</body>
+</html>

@@ -1,0 +1,512 @@
+@page "/submissions/{Id:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using PokemonCardGrader.Application.DTOs
+@using PokemonCardGrader.Application.Services
+@using PokemonCardGrader.Domain.Enums
+@using PokemonCardGrader.Domain.ValueObjects
+@inject CardSubmissionService CardSubmissionService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Submission - Calibra</PageTitle>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert-box danger">@_errorMessage</div>
+}
+else if (_submission is null)
+{
+    <p class="page-sub">Loading submission...</p>
+}
+else
+{
+    @* Top bar: back + meta + actions *@
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <a href="collection" class="btn btn-ghost">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none">
+                <path d="m15 6-6 6 6 6"/>
+            </svg>
+            Collection
+        </a>
+        <span class="mono" style="font-size:11px;color:var(--ink-4);margin-left:auto">
+            @Id.ToString()[..8]… · submitted @_submission.CreatedAt.LocalDateTime.ToString("MMM dd, yyyy")
+        </span>
+        @if (_showDeleteConfirm)
+        {
+            <span style="color:var(--rose);font-size:12px">Are you sure?</span>
+            <button class="btn btn-ghost" style="color:var(--rose)" @onclick="DeleteSubmissionAsync" disabled="@_isDeleting">Yes, delete</button>
+            <button class="btn btn-ghost" @onclick="() => _showDeleteConfirm = false" disabled="@_isDeleting">Cancel</button>
+        }
+        else
+        {
+            <button class="btn btn-ghost" style="color:var(--rose)" @onclick="() => _showDeleteConfirm = true">
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none">
+                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14"/>
+                </svg>
+            </button>
+        }
+    </div>
+
+    @* Two-column layout *@
+    <div class="detail-grid">
+        @* Left: card image + meta *@
+        <div>
+            <div class="collection-card-art" style="border-radius:14px;overflow:hidden">
+                @if (!string.IsNullOrEmpty(_submission.CardImageUrl))
+                {
+                    <img src="@_submission.CardImageUrl" alt="@_submission.CardName" loading="lazy" />
+                }
+                else
+                {
+                    <div class="card-art-placeholder" style="aspect-ratio:63/88">
+                        <span class="mono" style="font-size:10px;color:var(--ink-4)">NO IMG</span>
+                    </div>
+                }
+            </div>
+            <div style="margin-top:14px">
+                <h1 style="font-family:var(--sans);font-weight:500;font-size:24px;letter-spacing:-0.025em;margin:0">
+                    @_submission.CardName
+                </h1>
+                <div class="mono" style="font-size:12px;color:var(--ink-4);margin-top:6px">
+                    @_submission.SetName · #@_submission.Number
+                </div>
+                <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+                    @if (_submission.ActualResult is not null)
+                    {
+                        <span class="chip sage dot">Graded</span>
+                    }
+                    else if (_submission.Estimates.Count > 0)
+                    {
+                        <span class="chip accent dot">Estimated</span>
+                    }
+                    else
+                    {
+                        <span class="chip">Pending</span>
+                    }
+                </div>
+            </div>
+
+            @* Uploaded photos *@
+            @if (_submission.Images.Count > 0)
+            {
+                <div style="margin-top:20px">
+                    <div class="mono" style="font-size:10px;letter-spacing:0.1em;color:var(--ink-3);margin-bottom:8px">
+                        UPLOADED PHOTOS
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                        @foreach (var image in _submission.Images)
+                        {
+                            <div class="surface" style="padding:6px;display:flex;flex-direction:column">
+                                <div style="flex:1;min-height:0">
+                                    <img src="@image.ImageUrl" alt="@image.ImageType" loading="lazy"
+                                         style="width:100%;height:100%;object-fit:contain;border-radius:6px" />
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 2px 0">
+                                    <span style="font-size:11px;font-weight:500">@image.ImageType</span>
+                                    @if (image.IsAnalyzed)
+                                    {
+                                        <span class="mono" style="font-size:9px;color:var(--sage)">ANALYZED</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* Right: hero grade + estimates + record form *@
+        <div style="display:flex;flex-direction:column;gap:16px">
+            @* Hero grade panel *@
+            <div class="surface" style="padding:24px;display:flex;gap:28px;align-items:center">
+                <div>
+                    <div class="mono" style="font-size:10px;letter-spacing:0.14em;color:var(--ink-3);margin-bottom:4px">
+                        @(_submission.ActualResult is not null ? "FINAL GRADE" : "TOP ESTIMATE")
+                    </div>
+                    @{
+                        var topEstimate = _submission.Estimates.OrderByDescending(e => e.Confidence).FirstOrDefault();
+                    }
+                    <div class="mono" style="font-size:11px;color:var(--ink-3)">
+                        @(_submission.ActualResult?.Company.ToString() ?? topEstimate?.Company.ToString() ?? "—")
+                    </div>
+                    <div style="font-family:var(--sans);font-size:100px;font-weight:500;letter-spacing:-0.06em;line-height:0.9;margin-top:4px">
+                        @if (_submission.ActualResult is not null)
+                        {
+                            @_submission.ActualResult.ActualGrade.ToString("F1")
+                        }
+                        else if (topEstimate is not null)
+                        {
+                            @topEstimate.PredictedGrade.ToString("F1")
+                        }
+                        else
+                        {
+                            <span style="color:var(--ink-4)">—</span>
+                        }
+                    </div>
+                    <div style="font-size:14px;color:var(--ink-2);margin-top:4px">
+                        @if (_submission.ActualResult is not null)
+                        {
+                            @GetGradeLabel(_submission.ActualResult.ActualGrade)
+                        }
+                        else if (topEstimate is not null)
+                        {
+                            @topEstimate.Label
+                        }
+                    </div>
+                </div>
+
+                <div style="width:1px;background:var(--rule);align-self:stretch"></div>
+
+                @* Sub-grades *@
+                <div style="flex:1">
+                    @{
+                        var subGrades = GetDisplaySubGrades();
+                    }
+                    @if (subGrades.Count > 0)
+                    {
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+                            @foreach (var (label, value) in subGrades)
+                            {
+                                <div>
+                                    <div class="mono" style="font-size:9px;letter-spacing:0.1em;color:var(--ink-3)">
+                                        @label.ToUpper()
+                                    </div>
+                                    <div style="font-family:var(--sans);font-size:30px;font-weight:500;letter-spacing:-0.03em;line-height:1;margin-top:4px">
+                                        @value.ToString("F1")
+                                    </div>
+                                    <div class="bar" style="margin-top:8px">
+                                        <span style="width:@(value * 10)%"></span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (_submission.FinalScores is not null)
+                    {
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+                            <div>
+                                <div class="mono" style="font-size:9px;letter-spacing:0.1em;color:var(--ink-3)">CORNERS</div>
+                                <div style="font-family:var(--sans);font-size:30px;font-weight:500;letter-spacing:-0.03em;line-height:1;margin-top:4px">@_submission.FinalScores.Corners.ToString("F1")</div>
+                                <div class="bar" style="margin-top:8px"><span style="width:@(_submission.FinalScores.Corners * 10)%"></span></div>
+                            </div>
+                            <div>
+                                <div class="mono" style="font-size:9px;letter-spacing:0.1em;color:var(--ink-3)">EDGES</div>
+                                <div style="font-family:var(--sans);font-size:30px;font-weight:500;letter-spacing:-0.03em;line-height:1;margin-top:4px">@_submission.FinalScores.Edges.ToString("F1")</div>
+                                <div class="bar" style="margin-top:8px"><span style="width:@(_submission.FinalScores.Edges * 10)%"></span></div>
+                            </div>
+                            <div>
+                                <div class="mono" style="font-size:9px;letter-spacing:0.1em;color:var(--ink-3)">SURFACE</div>
+                                <div style="font-family:var(--sans);font-size:30px;font-weight:500;letter-spacing:-0.03em;line-height:1;margin-top:4px">@_submission.FinalScores.Surface.ToString("F1")</div>
+                                <div class="bar" style="margin-top:8px"><span style="width:@(_submission.FinalScores.Surface * 10)%"></span></div>
+                            </div>
+                            <div>
+                                <div class="mono" style="font-size:9px;letter-spacing:0.1em;color:var(--ink-3)">CENTERING</div>
+                                <div style="font-family:var(--sans);font-size:30px;font-weight:500;letter-spacing:-0.03em;line-height:1;margin-top:4px">@(((int)_submission.FinalScores.Centering.LeftRightFront + (int)_submission.FinalScores.Centering.TopBottomFront) / 2)%</div>
+                                <div class="bar" style="margin-top:8px"><span style="width:@(((int)_submission.FinalScores.Centering.LeftRightFront + (int)_submission.FinalScores.Centering.TopBottomFront) / 2 * 10 / 100)%"></span></div>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p style="color:var(--ink-4);font-size:13px">No sub-grade data available.</p>
+                    }
+
+                    @if (_submission.ActualResult is not null)
+                    {
+                        <div style="margin-top:18px;padding:12px;background:var(--sage-soft);border-radius:10px;display:flex;gap:12px;align-items:center">
+                            <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:var(--sage);stroke-width:2.5;fill:none">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                            <div>
+                                <div style="font-weight:500;font-size:13px">Actual grade recorded</div>
+                                <div class="mono" style="font-size:11px;color:var(--ink-3)">
+                                    @if (!string.IsNullOrEmpty(_submission.ActualResult.CertificationNumber))
+                                    {
+                                        <span>Cert #@_submission.ActualResult.CertificationNumber · </span>
+                                    }
+                                    @_submission.ActualResult.Company · recorded @_submission.ActualResult.RecordedAt.LocalDateTime.ToString("MMM dd, yyyy")
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @* Estimates by company *@
+            @if (_submission.Estimates.Count > 0)
+            {
+                <div class="surface">
+                    <div class="surface-h">
+                        <h3>Estimates by company</h3>
+                        <span class="chip" style="margin-left:auto">ML + rule-based</span>
+                    </div>
+                    <div style="padding:6px 0">
+                        @foreach (var (estimate, index) in _submission.Estimates.OrderByDescending(e => e.Confidence).Select((e, i) => (e, i)))
+                        {
+                            <div style="padding:14px 18px;@(index > 0 ? "border-top:1px solid var(--rule);" : "")display:grid;grid-template-columns:60px 70px 1fr 140px 90px;gap:16px;align-items:center">
+                                <span style="font-weight:600;font-size:13px;letter-spacing:-0.01em">@estimate.Company</span>
+                                <span style="font-family:var(--sans);font-size:28px;font-weight:500;letter-spacing:-0.03em;line-height:1">
+                                    @estimate.PredictedGrade.ToString("F1")
+                                </span>
+                                <span style="color:var(--ink-3);font-size:13px">@estimate.Label</span>
+                                <div>
+                                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                                        <span class="mono" style="color:var(--ink-3)">confidence</span>
+                                        <span class="mono" style="font-weight:500">@(Math.Round(estimate.Confidence * 100))%</span>
+                                    </div>
+                                    <div class="bar accent">
+                                        <span style="width:@(estimate.Confidence * 100)%"></span>
+                                    </div>
+                                </div>
+                                <span class="chip" style="justify-self:end">@(estimate.IsRuleBased ? "Rule" : "ML")</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="surface" style="padding:24px;text-align:center">
+                    <p style="color:var(--ink-3);font-size:13px">No grade estimates available yet. Estimates are generated after image analysis.</p>
+                </div>
+            }
+
+            @* Record actual grade *@
+            @if (_submission.ActualResult is null)
+            {
+                <div class="surface" style="@(_showRecordForm ? "" : "background:var(--canvas-sunk);border-style:dashed")">
+                    @if (!_showRecordForm)
+                    {
+                        <div style="padding:20px;display:flex;align-items:center;gap:14px">
+                            <div style="width:38px;height:38px;border-radius:10px;background:var(--paper);display:grid;place-items:center;border:1px solid var(--rule)">
+                                <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none">
+                                    <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+                                </svg>
+                            </div>
+                            <div style="flex:1">
+                                <div style="font-weight:500;font-size:13px">Already graded by a company?</div>
+                                <div style="font-size:12px;color:var(--ink-3)">Record the actual grade to improve future estimates.</div>
+                            </div>
+                            <button class="btn btn-primary" @onclick="() => _showRecordForm = true">Record grade</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="surface-h"><h3>Record actual grade</h3></div>
+                        <div class="surface-b">
+                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Company</label>
+                                    <select class="field-input" @bind="_actualCompany">
+                                        @foreach (var company in Enum.GetValues<GradingCompany>())
+                                        {
+                                            <option value="@company">@company</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Grade</label>
+                                    <input type="number" class="field-input" min="1" max="10" step="0.5" @bind="_actualGrade" />
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Cert #</label>
+                                    <input type="text" class="field-input" placeholder="Optional" @bind="_certificationNumber" />
+                                </div>
+                            </div>
+
+                            <div class="mono" style="font-size:10px;letter-spacing:0.1em;color:var(--ink-3);margin-bottom:8px">
+                                SUB-GRADES (OPTIONAL)
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Centering</label>
+                                    <input type="number" class="field-input" min="1" max="10" step="0.5" @bind="_actualSubCentering" />
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Corners</label>
+                                    <input type="number" class="field-input" min="1" max="10" step="0.5" @bind="_actualSubCorners" />
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Edges</label>
+                                    <input type="number" class="field-input" min="1" max="10" step="0.5" @bind="_actualSubEdges" />
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--ink-3);display:block;margin-bottom:6px">Surface</label>
+                                    <input type="number" class="field-input" min="1" max="10" step="0.5" @bind="_actualSubSurface" />
+                                </div>
+                            </div>
+
+                            <div style="margin-top:18px;display:flex;gap:8px">
+                                <button class="btn btn-ghost" @onclick="() => _showRecordForm = false">Cancel</button>
+                                <div style="margin-left:auto"></div>
+                                <button class="btn btn-primary" @onclick="RecordActualGradeAsync" disabled="@_isRecording">
+                                    @if (_isRecording)
+                                    {
+                                        <span>Saving...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Save grade</span>
+                                    }
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private CardSubmissionDto? _submission;
+    private string? _errorMessage;
+    private string? _userId;
+
+    // Delete confirmation
+    private bool _showDeleteConfirm;
+    private bool _isDeleting;
+
+    // Record actual grade form
+    private bool _showRecordForm;
+    private bool _isRecording;
+    private GradingCompany _actualCompany = GradingCompany.PSA;
+    private double _actualGrade = 9.0;
+    private string? _certificationNumber;
+    private double? _actualSubCentering;
+    private double? _actualSubCorners;
+    private double? _actualSubEdges;
+    private double? _actualSubSurface;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var user = (await AuthState).User;
+            _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(_userId))
+            {
+                _errorMessage = "Unable to identify the current user.";
+                return;
+            }
+
+            var submission = await CardSubmissionService.GetSubmissionAsync(Id, _userId);
+
+            if (submission is null)
+            {
+                _errorMessage = "Submission not found.";
+                return;
+            }
+
+            _submission = CardSubmissionService.MapToDto(submission);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load submission: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteSubmissionAsync()
+    {
+        if (string.IsNullOrEmpty(_userId))
+            return;
+
+        _isDeleting = true;
+        _errorMessage = null;
+
+        try
+        {
+            await CardSubmissionService.DeleteSubmissionAsync(Id, _userId);
+            NavigationManager.NavigateTo("submissions");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to delete submission: {ex.Message}";
+            _showDeleteConfirm = false;
+        }
+        finally
+        {
+            _isDeleting = false;
+        }
+    }
+
+    private async Task RecordActualGradeAsync()
+    {
+        if (string.IsNullOrEmpty(_userId))
+            return;
+
+        _isRecording = true;
+        _errorMessage = null;
+
+        try
+        {
+            var subGrades = new Dictionary<string, double>();
+
+            if (_actualSubCentering.HasValue)
+                subGrades["Centering"] = _actualSubCentering.Value;
+            if (_actualSubCorners.HasValue)
+                subGrades["Corners"] = _actualSubCorners.Value;
+            if (_actualSubEdges.HasValue)
+                subGrades["Edges"] = _actualSubEdges.Value;
+            if (_actualSubSurface.HasValue)
+                subGrades["Surface"] = _actualSubSurface.Value;
+
+            await CardSubmissionService.RecordActualGradeAsync(
+                Id, _userId, _actualCompany, _actualGrade, subGrades, _certificationNumber);
+
+            // Reload the submission to show updated data
+            var submission = await CardSubmissionService.GetSubmissionAsync(Id, _userId);
+
+            if (submission is not null)
+            {
+                _submission = CardSubmissionService.MapToDto(submission);
+            }
+
+            _showRecordForm = false;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to record grade: {ex.Message}";
+        }
+        finally
+        {
+            _isRecording = false;
+        }
+    }
+
+    private List<(string Label, double Value)> GetDisplaySubGrades()
+    {
+        // Prefer actual sub-grades, then top estimate sub-grades
+        if (_submission?.ActualResult?.ActualSubGrades is { Count: > 0 } actualSubs)
+        {
+            return actualSubs.Select(kv => (kv.Key, kv.Value)).ToList();
+        }
+
+        var top = _submission?.Estimates.OrderByDescending(e => e.Confidence).FirstOrDefault();
+
+        if (top?.SubGrades is { Count: > 0 } estSubs)
+        {
+            return estSubs.Select(kv => (kv.Key, kv.Value)).ToList();
+        }
+
+        return [];
+    }
+
+    private static string GetGradeLabel(double grade) => grade switch
+    {
+        >= 10 => "Gem Mint",
+        >= 9 => "Mint",
+        >= 8 => "Near Mint-Mint",
+        >= 7 => "Near Mint",
+        _ => "Excellent"
+    };
+}

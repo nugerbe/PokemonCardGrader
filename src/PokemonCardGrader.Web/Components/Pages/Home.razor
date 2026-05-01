@@ -1,0 +1,24 @@
+@page "/"
+@rendermode InteractiveServer
+@inject NavigationManager NavigationManager
+
+<PageTitle>Calibra - Card Grading Studio</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        @{ NavigationManager.NavigateTo("dashboard", replace: true); }
+    </Authorized>
+    <NotAuthorized>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:40px 20px">
+            <div class="brand-mark" style="width:48px;height:48px;font-size:22px;margin-bottom:24px">C</div>
+            <h1 class="display" style="font-size:36px;margin-bottom:8px">Calibra</h1>
+            <p class="page-sub" style="max-width:420px;margin-bottom:32px">
+                Estimate your Pokemon card grades across PSA, BGS, CGC, ACE, SGC, and TAG grading companies.
+            </p>
+            <div style="display:flex;gap:12px">
+                <a class="btn btn-primary" href="Account/Register">Get started</a>
+                <a class="btn btn-ghost" href="Account/Login">Sign in</a>
+            </div>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>

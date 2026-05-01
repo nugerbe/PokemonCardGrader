@@ -1,0 +1,100 @@
+@* Form to record actual grade received from a grading company *@
+
+<div class="card border-primary">
+    <div class="card-header bg-primary text-white">Record Actual Grade</div>
+    <div class="card-body">
+        <EditForm Model="this" OnValidSubmit="HandleSubmit" FormName="recordGrade">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Grading Company</label>
+                    <InputSelect class="form-select" @bind-Value="SelectedCompany">
+                        @foreach (var company in Enum.GetValues<GradingCompany>())
+                        {
+                            <option value="@company">@company</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Actual Grade</label>
+                    <InputNumber class="form-control" @bind-Value="ActualGrade" min="1" max="10" step="0.5" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Certification Number</label>
+                    <InputText class="form-control" @bind-Value="CertificationNumber" placeholder="Optional" />
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <h6>Sub-Grades (Optional)</h6>
+                <div class="row g-2">
+                    <div class="col-md-3">
+                        <label class="form-label">Centering</label>
+                        <InputNumber class="form-control" @bind-Value="SubCentering" min="1" max="10" step="0.5" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Corners</label>
+                        <InputNumber class="form-control" @bind-Value="SubCorners" min="1" max="10" step="0.5" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Edges</label>
+                        <InputNumber class="form-control" @bind-Value="SubEdges" min="1" max="10" step="0.5" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Surface</label>
+                        <InputNumber class="form-control" @bind-Value="SubSurface" min="1" max="10" step="0.5" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary" disabled="@IsSubmitting">
+                    @(IsSubmitting ? "Saving..." : "Save Actual Grade")
+                </button>
+                <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(ErrorMessage))
+            {
+                <div class="alert alert-danger mt-2">@ErrorMessage</div>
+            }
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid SubmissionId { get; set; }
+    [Parameter] public EventCallback<bool> OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private GradingCompany SelectedCompany { get; set; } = GradingCompany.PSA;
+    private double ActualGrade { get; set; } = 8.0;
+    private string? CertificationNumber { get; set; }
+    private double? SubCentering { get; set; }
+    private double? SubCorners { get; set; }
+    private double? SubEdges { get; set; }
+    private double? SubSurface { get; set; }
+    private bool IsSubmitting { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    public GradingCompany GetSelectedCompany() => SelectedCompany;
+    public double GetActualGrade() => ActualGrade;
+    public string? GetCertificationNumber() => CertificationNumber;
+
+    public Dictionary<string, double> GetSubGrades()
+    {
+        var subGrades = new Dictionary<string, double>();
+        if (SubCentering.HasValue) subGrades["Centering"] = SubCentering.Value;
+        if (SubCorners.HasValue) subGrades["Corners"] = SubCorners.Value;
+        if (SubEdges.HasValue) subGrades["Edges"] = SubEdges.Value;
+        if (SubSurface.HasValue) subGrades["Surface"] = SubSurface.Value;
+        return subGrades;
+    }
+
+    private async Task HandleSubmit()
+    {
+        IsSubmitting = true;
+        ErrorMessage = null;
+        await OnSaved.InvokeAsync(true);
+        IsSubmitting = false;
+    }
+}

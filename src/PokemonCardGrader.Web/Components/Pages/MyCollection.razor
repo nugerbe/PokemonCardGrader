@@ -1,0 +1,273 @@
+@page "/collection"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using PokemonCardGrader.Application.DTOs
+@using PokemonCardGrader.Application.Services
+@inject CardSubmissionService CardSubmissionService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Collection - Calibra</PageTitle>
+
+<div style="display:flex;align-items:flex-end;margin-bottom:24px">
+    <div>
+        <h1 class="display">Collection</h1>
+        <p class="page-sub" style="margin-bottom:0">@_submissions.Count cards</p>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+        <a href="submissions/new" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-right:4px">
+                <path d="M12 5v14M5 12h14"/>
+            </svg>
+            New submission
+        </a>
+    </div>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert-box danger">@_errorMessage</div>
+}
+else if (_isLoading)
+{
+    <p class="page-sub">Loading collection...</p>
+}
+else if (_submissions.Count == 0)
+{
+    <div class="surface" style="text-align:center;padding:60px 20px">
+        <p style="color:var(--ink-3);font-size:14px;margin-bottom:16px">Your collection is empty.</p>
+        <a href="cards/search" class="btn btn-primary">Search for a card</a>
+    </div>
+}
+else
+{
+    @* Filter bar *@
+    <div class="filter-bar">
+        <div class="filter-tabs">
+            <button class="@(_filter == "all" ? "active" : "")" @onclick='() => SetFilter("all")'>All</button>
+            <button class="@(_filter == "estimated" ? "active" : "")" @onclick='() => SetFilter("estimated")'>Estimated</button>
+            <button class="@(_filter == "graded" ? "active" : "")" @onclick='() => SetFilter("graded")'>Graded</button>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn btn-ghost @(_view == "grid" ? "view-active" : "")" style="padding:6px" @onclick='() => _view = "grid"'>
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none">
+                    <rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>
+                </svg>
+            </button>
+            <button class="btn btn-ghost @(_view == "list" ? "view-active" : "")" style="padding:6px" @onclick='() => _view = "list"'>
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none">
+                    <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 4v16M4 8h16"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    @if (_view == "grid")
+    {
+        <div class="collection-grid">
+            @foreach (var sub in FilteredSubmissions)
+            {
+                var topEstimate = sub.Estimates.OrderByDescending(e => e.Confidence).FirstOrDefault();
+
+                <div class="collection-card" @onclick="() => NavigateToDetail(sub.Id)">
+                    <div class="collection-card-art">
+                        @if (!string.IsNullOrEmpty(sub.CardImageUrl))
+                        {
+                            <img src="@sub.CardImageUrl" alt="@sub.CardName" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="card-art-placeholder">
+                                <span class="mono" style="font-size:10px;color:var(--ink-4)">NO IMG</span>
+                            </div>
+                        }
+                        @if (sub.ActualResult is not null)
+                        {
+                            <div class="card-grade-badge">
+                                <span class="mono" style="font-size:9px;color:var(--ink-3)">@sub.ActualResult.Company</span>
+                                <span style="font-family:var(--sans);font-size:14px;font-weight:500">@sub.ActualResult.ActualGrade</span>
+                            </div>
+                        }
+                    </div>
+                    <div style="display:flex;align-items:flex-start;gap:8px">
+                        <div style="flex:1;min-width:0">
+                            <div style="font-weight:500;font-size:13.5px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">@sub.CardName</div>
+                            <div class="mono" style="font-size:11px;color:var(--ink-4);margin-top:2px">@sub.SetName · #@sub.Number</div>
+                        </div>
+                        @if (topEstimate is not null)
+                        {
+                            <div style="text-align:right">
+                                <div class="mono" style="font-size:9px;color:var(--ink-3);letter-spacing:0.1em">EST @topEstimate.Company</div>
+                                <div style="font-family:var(--sans);font-size:18px;font-weight:500;letter-spacing:-0.03em;line-height:1">@topEstimate.PredictedGrade.ToString("F1")</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="surface">
+            <table class="clean">
+                <thead>
+                    <tr>
+                        <th>Card</th>
+                        <th>Set</th>
+                        <th>Submitted</th>
+                        <th>Estimate</th>
+                        <th>Actual</th>
+                        <th style="width:30px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var sub in FilteredSubmissions)
+                    {
+                        var topEstimate = sub.Estimates.OrderByDescending(e => e.Confidence).FirstOrDefault();
+
+                        <tr @onclick="() => NavigateToDetail(sub.Id)">
+                            <td>
+                                <div style="display:flex;gap:12px;align-items:center">
+                                    <div>
+                                        <div style="font-weight:500">@sub.CardName</div>
+                                        <div class="mono" style="font-size:10.5px;color:var(--ink-4)">#@sub.Number</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span style="font-size:12px">@sub.SetName</span></td>
+                            <td><span class="mono" style="font-size:12px;color:var(--ink-3)">@sub.CreatedAt.LocalDateTime.ToString("MMM dd")</span></td>
+                            <td>
+                                @if (topEstimate is not null)
+                                {
+                                    <span>
+                                        <span class="mono" style="font-size:10px;color:var(--ink-3)">@topEstimate.Company</span>
+                                        <span style="font-family:var(--sans);font-weight:500"> @topEstimate.PredictedGrade.ToString("F1")</span>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span style="color:var(--ink-4);font-size:12px">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (sub.ActualResult is not null)
+                                {
+                                    <span class="chip sage dot">@sub.ActualResult.Company @sub.ActualResult.ActualGrade</span>
+                                }
+                                else
+                                {
+                                    <span style="color:var(--ink-4);font-size:12px">—</span>
+                                }
+                            </td>
+                            <td>
+                                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;color:var(--ink-4)">
+                                    <path d="m9 6 6 6-6 6"/>
+                                </svg>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @* Pagination *@
+    @if (_hasMorePages || _currentPage > 1)
+    {
+        <div style="display:flex;justify-content:center;gap:8px;margin-top:24px">
+            <button class="btn btn-ghost" disabled="@(_currentPage <= 1)" @onclick="PreviousPageAsync">Previous</button>
+            <span class="mono" style="padding:8px 12px;font-size:12px;color:var(--ink-3)">Page @_currentPage</span>
+            <button class="btn btn-ghost" disabled="@(!_hasMorePages)" @onclick="NextPageAsync">Next</button>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private List<CardSubmissionDto> _submissions = [];
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private int _currentPage = 1;
+    private bool _hasMorePages;
+    private string _filter = "all";
+    private string _view = "grid";
+    private const int PageSize = 20;
+
+    private IEnumerable<CardSubmissionDto> FilteredSubmissions => _filter switch
+    {
+        "graded" => _submissions.Where(s => s.ActualResult is not null),
+        "estimated" => _submissions.Where(s => s.ActualResult is null),
+        _ => _submissions
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCollectionAsync();
+    }
+
+    private void SetFilter(string filter)
+    {
+        _filter = filter;
+    }
+
+    private async Task LoadCollectionAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var user = (await AuthState).User;
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                _errorMessage = "Unable to identify the current user.";
+                return;
+            }
+
+            var submissions = await CardSubmissionService.GetUserSubmissionsAsync(
+                userId, _currentPage, PageSize);
+
+            _submissions = submissions
+                .Select(CardSubmissionService.MapToDto)
+                .ToList();
+
+            _hasMorePages = submissions.Count == PageSize;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load collection: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task PreviousPageAsync()
+    {
+        if (_currentPage > 1)
+        {
+            _currentPage--;
+            await LoadCollectionAsync();
+        }
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (_hasMorePages)
+        {
+            _currentPage++;
+            await LoadCollectionAsync();
+        }
+    }
+
+    private void NavigateToDetail(Guid id)
+    {
+        NavigationManager.NavigateTo($"submissions/{id}");
+    }
+}

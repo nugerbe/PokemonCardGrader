@@ -1,0 +1,1059 @@
+@page "/submissions/new"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using Microsoft.Extensions.DependencyInjection
+@using PokemonCardGrader.Application.DTOs
+@using PokemonCardGrader.Application.Services
+@using PokemonCardGrader.Domain.Entities
+@using PokemonCardGrader.Domain.Enums
+@using PokemonCardGrader.Domain.ValueObjects
+@inject CardLookupService CardLookupService
+@inject CardSubmissionService CardSubmissionService
+@inject NavigationManager NavigationManager
+@inject IServiceScopeFactory ScopeFactory
+@implements IDisposable
+
+<PageTitle>New Submission - Calibra</PageTitle>
+
+<div style="display:flex;align-items:flex-end;margin-bottom:20px">
+    <div>
+        <h1 class="display">New submission</h1>
+        <p class="page-sub" style="margin-bottom:0">Grade a single card for one or more grading companies.</p>
+    </div>
+    <a href="collection" class="btn btn-ghost" style="margin-left:auto">Cancel</a>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert-box danger">@_errorMessage</div>
+}
+
+@* Stepper *@
+<div class="stepper">
+    @foreach (var (label, idx) in new[] { ("Select card", 1), ("Input method", 2), ("Provide scores", 3), ("Review", 4) })
+    {
+        var active = _currentStep == idx;
+        var done = _currentStep > idx;
+        <button class="stepper-step @(active ? "active" : "") @(done ? "done" : "")"
+                disabled="@(!done && !active)"
+                @onclick="() => { if (done) GoToStep(idx); }">
+            <div class="stepper-num">
+                @if (done)
+                {
+                    <svg viewBox="0 0 24 24" style="width:11px;height:11px;stroke:currentColor;stroke-width:2.5;fill:none">
+                        <path d="M20 6 9 17l-5-5"/>
+                    </svg>
+                }
+                else
+                {
+                    @idx
+                }
+            </div>
+            <span>@label</span>
+        </button>
+    }
+</div>
+
+@* Step 1: Select Card *@
+@if (_currentStep == 1)
+{
+    @if (_selectedCard is not null)
+    {
+        <div class="surface" style="margin-bottom:16px">
+            <div style="padding:18px;display:flex;align-items:center;gap:16px">
+                @if (!string.IsNullOrEmpty(_selectedCardDto?.ImageUrlSmall))
+                {
+                    <img src="@_selectedCardDto.ImageUrlSmall" alt="@_selectedCardDto.Name"
+                         style="height:100px;object-fit:contain;border-radius:8px" />
+                }
+                <div style="flex:1">
+                    <div style="font-weight:500;font-size:16px">@_selectedCard.Name</div>
+                    <div class="mono" style="font-size:12px;color:var(--ink-3);margin-top:4px">@_selectedCard.SetName · #@_selectedCard.Number</div>
+                </div>
+                <button class="btn btn-ghost" @onclick="ClearSelectedCard">Change</button>
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="() => GoToStep(2)">
+            Continue
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-left:4px">
+                <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+            </svg>
+        </button>
+    }
+    else
+    {
+        <div class="surface">
+            <div class="surface-h">
+                <h3>Find your card</h3>
+                @if (_inlineSearchResults.Count > 0)
+                {
+                    <span class="mono" style="font-size:11px;color:var(--ink-4);margin-left:auto">@_inlineSearchResults.Count results</span>
+                }
+            </div>
+            <div class="surface-b">
+                <div class="search" style="margin-bottom:20px;min-width:0">
+                    <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:1.5;fill:none;color:var(--ink-4)">
+                        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+                    </svg>
+                    <input placeholder="Search name, number, or set…"
+                           @bind="_inlineSearchQuery"
+                           @bind:event="oninput"
+                           @onkeydown="HandleInlineKeyDown" />
+                    <button class="btn btn-primary" style="padding:6px 14px;font-size:12px;border-radius:8px"
+                            @onclick="InlineSearchAsync" disabled="@_isSearching">
+                        @(_isSearching ? "Searching…" : "Search")
+                    </button>
+                </div>
+
+                @if (_inlineSearchResults.Count > 0)
+                {
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px">
+                        @foreach (var card in _inlineSearchResults)
+                        {
+                            <button class="card-pick" @onclick="() => SelectCardFromSearch(card)">
+                                @if (!string.IsNullOrEmpty(card.ImageUrlSmall))
+                                {
+                                    <div style="aspect-ratio:63/88;overflow:hidden;border-radius:8px;background:var(--canvas-sunk)">
+                                        <img src="@card.ImageUrlSmall" alt="@card.Name" loading="lazy"
+                                             style="width:100%;height:100%;object-fit:contain" />
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div style="aspect-ratio:63/88;border-radius:8px;background:var(--canvas-sunk);display:grid;place-items:center">
+                                        <span class="mono" style="font-size:9px;color:var(--ink-4)">NO IMG</span>
+                                    </div>
+                                }
+                                <div style="margin-top:8px;font-weight:500;font-size:13px;text-align:left">@card.Name</div>
+                                <div class="mono" style="font-size:10.5px;color:var(--ink-4);margin-top:2px;text-align:left">@card.SetCode · #@card.Number</div>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@* Step 2: Choose Input Method *@
+@if (_currentStep == 2)
+{
+    <div class="surface">
+        <div class="surface-h"><h3>How do you want to score this card?</h3></div>
+        <div class="surface-b" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+            <button class="method-card @(_inputMethod == InputMethod.Images ? "selected" : "")"
+                    @onclick="() => _inputMethod = InputMethod.Images">
+                <span class="method-chip">Recommended</span>
+                <div class="method-icon">
+                    <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+                    </svg>
+                </div>
+                <div style="font-weight:500;font-size:14px;margin-bottom:4px">Upload photos</div>
+                <div style="color:var(--ink-3);font-size:12px;line-height:1.5">Front and back. Our vision model measures centering, corners, edges, surface.</div>
+            </button>
+            <button class="method-card @(_inputMethod == InputMethod.Manual ? "selected" : "")"
+                    @onclick="() => _inputMethod = InputMethod.Manual">
+                <div class="method-icon">
+                    <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none">
+                        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/>
+                    </svg>
+                </div>
+                <div style="font-weight:500;font-size:14px;margin-bottom:4px">Score manually</div>
+                <div style="color:var(--ink-3);font-size:12px;line-height:1.5">Use guided sliders — fastest if you already know the grades.</div>
+            </button>
+            <button class="method-card @(_inputMethod == InputMethod.Both ? "selected" : "")"
+                    @onclick="() => _inputMethod = InputMethod.Both">
+                <span class="method-chip">Best</span>
+                <div class="method-icon">
+                    <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none">
+                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/>
+                    </svg>
+                </div>
+                <div style="font-weight:500;font-size:14px;margin-bottom:4px">Photos + fine-tune</div>
+                <div style="color:var(--ink-3);font-size:12px;line-height:1.5">Start from AI measurements, adjust whatever looks off.</div>
+            </button>
+        </div>
+        <div style="padding:0 18px 18px;display:flex;gap:8px">
+            <button class="btn btn-ghost" @onclick="() => GoToStep(1)">
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none"><path d="m15 6-6 6 6 6"/></svg>
+                Back
+            </button>
+            <div style="margin-left:auto"></div>
+            <button class="btn btn-primary" @onclick="ProceedFromInputMethod">
+                Continue
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-left:4px">
+                    <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+}
+
+@* Step 3: Provide Scores — kept in DOM to preserve ImageOverlayEditor canvas state *@
+@if (_step3Reached)
+{
+<div style="@(_currentStep == 3 ? "" : "display:none")">
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:16px">
+            @* Image Upload Section *@
+            @if (_inputMethod is InputMethod.Images or InputMethod.Both)
+            {
+                <div class="surface">
+                    <div class="surface-h">
+                        <h3>Upload images</h3>
+                        @if (_isWaitingForAnalysis)
+                        {
+                            <span class="chip accent dot">Analyzing</span>
+                        }
+                        @if (_imageDerivedScores is not null)
+                        {
+                            <span class="chip sage dot">Analysis complete</span>
+                        }
+                    </div>
+                    <div class="surface-b">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                            <div class="upload-zone @(_frontUploaded ? "uploaded" : "")">
+                                @if (_frontUploaded)
+                                {
+                                    <svg viewBox="0 0 24 24" style="width:24px;height:24px;stroke:var(--sage);stroke-width:2;fill:none">
+                                        <path d="M20 6 9 17l-5-5"/>
+                                    </svg>
+                                    <div style="margin-top:8px;font-weight:500;font-size:13px">Front uploaded</div>
+                                }
+                                else
+                                {
+                                    <ImageUploader SubmissionId="@_createdSubmissionId"
+                                                   UserId="@_userId"
+                                                   ImageType="ImageType.Front"
+                                                   OnUploadComplete="HandleFrontUploaded"
+                                                   OnLocalImageReady="HandleFrontLocalImageReady" />
+                                }
+                            </div>
+                            <div class="upload-zone @(_backUploaded ? "uploaded" : "")">
+                                @if (_backUploaded)
+                                {
+                                    <svg viewBox="0 0 24 24" style="width:24px;height:24px;stroke:var(--sage);stroke-width:2;fill:none">
+                                        <path d="M20 6 9 17l-5-5"/>
+                                    </svg>
+                                    <div style="margin-top:8px;font-weight:500;font-size:13px">Back uploaded</div>
+                                }
+                                else
+                                {
+                                    <ImageUploader SubmissionId="@_createdSubmissionId"
+                                                   UserId="@_userId"
+                                                   ImageType="ImageType.Back"
+                                                   OnUploadComplete="HandleBackUploaded"
+                                                   OnLocalImageReady="HandleBackLocalImageReady" />
+                                }
+                            </div>
+                        </div>
+
+                        @if (_isWaitingForAnalysis)
+                        {
+                            <div style="margin-top:16px;padding:14px;background:var(--accent-soft);border-radius:10px;display:flex;gap:12px;align-items:center">
+                                <div class="spin-loader"></div>
+                                <div>
+                                    <div style="font-weight:500;font-size:13px;color:var(--accent-ink)">Reading measurements</div>
+                                    <div style="font-size:12px;color:var(--accent-ink);opacity:0.7">Detecting edges, centering, and surface defects…</div>
+                                </div>
+                            </div>
+                        }
+
+                        @if (_imageDerivedScores is not null && _inputMethod == InputMethod.Images && !_imageScoresApplied)
+                        {
+                            <div style="margin-top:14px;display:flex;justify-content:flex-end">
+                                <button class="btn btn-primary" style="font-size:12px" @onclick="UseImageScores">Use these scores</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @* Overlay editor: appears immediately when local image exists, or after analysis *@
+                @if (_frontLocalDataUrl is not null || _backLocalDataUrl is not null || _analyzedImages.Count > 0)
+                {
+                    <div class="surface">
+                        <div class="surface-h">
+                            <h3>Centering overlay</h3>
+                            <span class="mono" style="font-size:11px;color:var(--ink-4);margin-left:auto">Adjust card boundary &amp; detection</span>
+                        </div>
+                        <div class="surface-b" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+                            @{
+                                var frontAnalyzed = _analyzedImages.FirstOrDefault(i => i.ImageType == ImageType.Front);
+                                var backAnalyzed = _analyzedImages.FirstOrDefault(i => i.ImageType == ImageType.Back);
+                            }
+
+                            @if (_frontLocalDataUrl is not null || frontAnalyzed is not null)
+                            {
+                                <div @key="@("front-overlay")">
+                                    <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3);margin-bottom:6px">FRONT</div>
+                                    <ImageOverlayEditor ImageUrl="@(frontAnalyzed?.ImageUrl ?? string.Empty)"
+                                                        LocalImageDataUrl="@(frontAnalyzed is null ? _frontLocalDataUrl : null)"
+                                                        ImmediateMode="@(frontAnalyzed is null)"
+                                                        Overlay="@frontAnalyzed?.Overlay"
+                                                        DetectedDefects="@frontAnalyzed?.DetectedDefects"
+                                                        CardImageId="@(frontAnalyzed?.Id ?? Guid.Empty)"
+                                                        OnCorrectionSubmitted="HandleCorrectionSubmitted" />
+                                </div>
+                            }
+
+                            @if (_backLocalDataUrl is not null || backAnalyzed is not null)
+                            {
+                                <div @key="@("back-overlay")">
+                                    <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3);margin-bottom:6px">BACK</div>
+                                    <ImageOverlayEditor ImageUrl="@(backAnalyzed?.ImageUrl ?? string.Empty)"
+                                                        LocalImageDataUrl="@(backAnalyzed is null ? _backLocalDataUrl : null)"
+                                                        ImmediateMode="@(backAnalyzed is null)"
+                                                        Overlay="@backAnalyzed?.Overlay"
+                                                        DetectedDefects="@backAnalyzed?.DetectedDefects"
+                                                        CardImageId="@(backAnalyzed?.Id ?? Guid.Empty)"
+                                                        OnCorrectionSubmitted="HandleCorrectionSubmitted" />
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+
+            @* Manual Scoring Section *@
+            @if (_inputMethod is InputMethod.Manual or InputMethod.Both)
+            {
+                @if (_inputMethod == InputMethod.Both && _imageDerivedScores is null && _isWaitingForAnalysis)
+                {
+                    <div class="surface" style="padding:14px 18px;border-left:3px solid var(--accent)">
+                        <span style="font-size:13px;color:var(--ink-3)">Waiting for image analysis to pre-fill scores. You can also fill them manually below.</span>
+                    </div>
+                }
+
+                <div class="surface">
+                    <div class="surface-h">
+                        <h3>Centering</h3>
+                        <span class="mono" style="font-size:11px;color:var(--ink-4);margin-left:auto">50% = perfectly centered</span>
+                    </div>
+                    <div class="surface-b" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
+                                <span style="color:var(--ink-2)">Front · Left / Right</span>
+                                <span class="mono" style="font-weight:500">@_centeringLeftRightFront.ToString("F0")%</span>
+                            </div>
+                            <input type="range" class="slider" min="30" max="70" step="1"
+                                   @bind="_centeringLeftRightFront" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
+                                <span style="color:var(--ink-2)">Front · Top / Bottom</span>
+                                <span class="mono" style="font-weight:500">@_centeringTopBottomFront.ToString("F0")%</span>
+                            </div>
+                            <input type="range" class="slider" min="30" max="70" step="1"
+                                   @bind="_centeringTopBottomFront" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
+                                <span style="color:var(--ink-2)">Back · Left / Right</span>
+                                <span class="mono" style="font-weight:500">@_centeringLeftRightBack.ToString("F0")%</span>
+                            </div>
+                            <input type="range" class="slider" min="30" max="70" step="1"
+                                   @bind="_centeringLeftRightBack" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
+                                <span style="color:var(--ink-2)">Back · Top / Bottom</span>
+                                <span class="mono" style="font-weight:500">@_centeringTopBottomBack.ToString("F0")%</span>
+                            </div>
+                            <input type="range" class="slider" min="30" max="70" step="1"
+                                   @bind="_centeringTopBottomBack" @bind:event="oninput" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="surface">
+                    <div class="surface-h">
+                        <h3>Physical condition</h3>
+                        <span class="mono" style="font-size:11px;color:var(--ink-4);margin-left:auto">1–10 · 0.5 steps</span>
+                    </div>
+                    <div class="surface-b" style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+                                <span style="color:var(--ink-2);font-size:12px">Corners</span>
+                                <span style="font-family:var(--sans);font-size:22px;font-weight:500;letter-spacing:-0.03em">@_corners.ToString("F1")</span>
+                            </div>
+                            <input type="range" class="slider accent" min="1" max="10" step="0.5"
+                                   @bind="_corners" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+                                <span style="color:var(--ink-2);font-size:12px">Edges</span>
+                                <span style="font-family:var(--sans);font-size:22px;font-weight:500;letter-spacing:-0.03em">@_edges.ToString("F1")</span>
+                            </div>
+                            <input type="range" class="slider accent" min="1" max="10" step="0.5"
+                                   @bind="_edges" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+                                <span style="color:var(--ink-2);font-size:12px">Surface</span>
+                                <span style="font-family:var(--sans);font-size:22px;font-weight:500;letter-spacing:-0.03em">@_surface.ToString("F1")</span>
+                            </div>
+                            <input type="range" class="slider accent" min="1" max="10" step="0.5"
+                                   @bind="_surface" @bind:event="oninput" />
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="surface">
+                <div class="surface-b">
+                    <label style="font-size:12px;font-weight:500;color:var(--ink-2);display:block;margin-bottom:8px">
+                        Notes <span style="color:var(--ink-4);font-weight:400">(optional)</span>
+                    </label>
+                    <textarea class="field-input" rows="3" @bind="_notes"
+                              style="resize:vertical;background:var(--canvas)"
+                              placeholder="Any chips, scratches, print lines, or other observations…"></textarea>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-ghost" @onclick="() => GoToStep(2)">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none"><path d="m15 6-6 6 6 6"/></svg>
+                    Back
+                </button>
+                <div style="margin-left:auto"></div>
+                <button class="btn btn-primary" @onclick="() => GoToStep(4)" disabled="@(!CanProceedToReview())">
+                    Review submission
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-left:4px">
+                        <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        @* Sidebar: card preview + live estimate *@
+        <aside style="position:sticky;top:84px;align-self:start">
+            <div class="surface">
+                @if (!string.IsNullOrEmpty(_selectedCardDto?.ImageUrlSmall))
+                {
+                    <div style="padding:14px">
+                        <img src="@_selectedCardDto.ImageUrlSmall" alt="@_selectedCard?.Name"
+                             style="width:100%;border-radius:8px;object-fit:contain" />
+                    </div>
+                }
+                <div style="padding:0 14px 14px">
+                    <div style="font-weight:500;font-size:13px">@_selectedCard?.Name</div>
+                    <div class="mono" style="font-size:11px;color:var(--ink-3);margin-top:2px">@_selectedCard?.SetCode · #@_selectedCard?.Number</div>
+                </div>
+                <div style="height:1px;background:var(--rule)"></div>
+                <div style="padding:14px">
+                    <div class="mono" style="font-size:10px;letter-spacing:0.1em;color:var(--ink-3);margin-bottom:10px">
+                        LIVE ESTIMATE · PSA
+                    </div>
+                    <div style="display:flex;align-items:baseline;gap:10px">
+                        <span style="font-family:var(--sans);font-size:48px;font-weight:500;letter-spacing:-0.04em;line-height:1">
+                            @GetLiveEstimate().ToString("F1")
+                        </span>
+                        <span class="chip accent">~@GetLiveConfidence()% conf.</span>
+                    </div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--ink-3)">
+                        @GetGradeLabel(GetLiveEstimate())
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+}
+
+@* Step 4: Review & Submit *@
+@if (_currentStep == 4)
+{
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="surface">
+            <div class="surface-h"><h3>Card</h3></div>
+            <div class="surface-b" style="text-align:center">
+                @if (!string.IsNullOrEmpty(_selectedCardDto?.ImageUrlSmall))
+                {
+                    <div style="max-width:240px;margin:0 auto 16px">
+                        <img src="@_selectedCardDto.ImageUrlSmall" alt="@_selectedCard?.Name"
+                             style="width:100%;border-radius:10px" />
+                    </div>
+                }
+                <div style="font-family:var(--sans);font-size:20px;font-weight:500;letter-spacing:-0.02em">@_selectedCard?.Name</div>
+                <div class="mono" style="font-size:12px;color:var(--ink-3);margin-top:4px">
+                    @_selectedCard?.SetName · @_selectedCard?.SetCode · #@_selectedCard?.Number
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+            <div class="surface">
+                <div class="surface-h"><h3>Scores</h3></div>
+                <div class="surface-b" style="display:grid;grid-template-columns:1fr 1fr;row-gap:10px;column-gap:20px;font-size:13px">
+                    <div class="review-row"><span style="color:var(--ink-3)">Centering · Front L/R</span><span class="mono" style="font-weight:500">@_centeringLeftRightFront.ToString("F0")%</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Centering · Front T/B</span><span class="mono" style="font-weight:500">@_centeringTopBottomFront.ToString("F0")%</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Centering · Back L/R</span><span class="mono" style="font-weight:500">@_centeringLeftRightBack.ToString("F0")%</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Centering · Back T/B</span><span class="mono" style="font-weight:500">@_centeringTopBottomBack.ToString("F0")%</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Corners</span><span class="mono" style="font-weight:500">@_corners.ToString("F1")</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Edges</span><span class="mono" style="font-weight:500">@_edges.ToString("F1")</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Surface</span><span class="mono" style="font-weight:500">@_surface.ToString("F1")</span></div>
+                    <div class="review-row"><span style="color:var(--ink-3)">Method</span><span class="mono" style="font-weight:500">@GetMethodLabel()</span></div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-ghost" @onclick="() => GoToStep(3)">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none"><path d="m15 6-6 6 6 6"/></svg>
+                    Back
+                </button>
+                <div style="margin-left:auto"></div>
+                <button class="btn btn-primary" style="padding:12px 24px" @onclick="SubmitAsync" disabled="@_isSubmitting">
+                    @if (_isSubmitting)
+                    {
+                        <span>Submitting…</span>
+                    }
+                    else
+                    {
+                        <span>Submit for grading</span>
+                        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;vertical-align:middle;margin-left:4px">
+                            <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+                        </svg>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    @@keyframes spin { to { transform: rotate(360deg); } }
+    .spin-loader {
+        width: 20px; height: 20px;
+        border: 2px solid var(--accent-ink);
+        border-top-color: transparent;
+        border-radius: 10px;
+        animation: spin 0.8s linear infinite;
+    }
+</style>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    [SupplyParameterFromQuery(Name = "cardId")]
+    private string? CardIdParam { get; set; }
+
+    private int _currentStep = 1;
+    private PokemonCard? _selectedCard;
+    private PokemonCardDto? _selectedCardDto;
+
+    // Inline search
+    private string _inlineSearchQuery = string.Empty;
+    private List<PokemonCardDto> _inlineSearchResults = [];
+    private bool _isSearching;
+
+    // Input method selection
+    private InputMethod _inputMethod = InputMethod.Images;
+
+    // Submission tracking
+    private Guid _createdSubmissionId;
+    private string _userId = string.Empty;
+    private bool _submissionCreated;
+
+    // Image upload tracking
+    private bool _frontUploaded;
+    private bool _backUploaded;
+    private bool _isWaitingForAnalysis;
+    private ConditionScores? _imageDerivedScores;
+    private bool _imageScoresApplied;
+    private CancellationTokenSource? _pollingCts;
+    private List<CardImageDto> _analyzedImages = [];
+
+    // Local image data URLs for immediate overlay display
+    private string? _frontLocalDataUrl;
+    private string? _backLocalDataUrl;
+
+    // Condition scores
+    private double _centeringLeftRightFront = 50;
+    private double _centeringTopBottomFront = 50;
+    private double _centeringLeftRightBack = 50;
+    private double _centeringTopBottomBack = 50;
+    private double _corners = 8.0;
+    private double _edges = 8.0;
+    private double _surface = 8.0;
+    private string? _notes;
+
+    private bool _step3Reached;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState).User;
+        _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+        if (!string.IsNullOrEmpty(CardIdParam))
+        {
+            try
+            {
+                _selectedCard = await CardLookupService.GetOrCreateCardAsync(CardIdParam);
+                _selectedCardDto = new PokemonCardDto
+                {
+                    TcgApiId = CardIdParam,
+                    Name = _selectedCard.Name,
+                    SetName = _selectedCard.SetName,
+                    SetCode = _selectedCard.SetCode,
+                    Number = _selectedCard.Number,
+                    Rarity = _selectedCard.Rarity.ToString(),
+                    ImageUrlSmall = _selectedCard.ImageUrl,
+                    ImageUrlLarge = _selectedCard.ImageUrl
+                };
+            }
+            catch (Exception ex)
+            {
+                _errorMessage = $"Failed to load card: {ex.Message}";
+            }
+        }
+    }
+
+    private async Task HandleInlineKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await InlineSearchAsync();
+        }
+    }
+
+    private async Task InlineSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inlineSearchQuery))
+            return;
+
+        _isSearching = true;
+        _errorMessage = null;
+
+        try
+        {
+            _inlineSearchResults = await CardLookupService.SearchCardsAsync(_inlineSearchQuery);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Search failed: {ex.Message}";
+            _inlineSearchResults = [];
+        }
+        finally
+        {
+            _isSearching = false;
+        }
+    }
+
+    private async Task SelectCardFromSearch(PokemonCardDto dto)
+    {
+        _errorMessage = null;
+
+        try
+        {
+            _selectedCard = await CardLookupService.GetOrCreateCardAsync(dto.TcgApiId);
+            _selectedCardDto = dto;
+            _inlineSearchResults = [];
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load card: {ex.Message}";
+        }
+    }
+
+    private void ClearSelectedCard()
+    {
+        _selectedCard = null;
+        _selectedCardDto = null;
+    }
+
+    private async Task ProceedFromInputMethod()
+    {
+        if (_selectedCard is null)
+        {
+            _errorMessage = "Please select a card first.";
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_userId))
+        {
+            _errorMessage = "Unable to identify the current user.";
+            return;
+        }
+
+        if (!_submissionCreated)
+        {
+            try
+            {
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                var service = scope.ServiceProvider.GetRequiredService<CardSubmissionService>();
+                var submission = await service.CreateSubmissionAsync(
+                    _userId, _selectedCard.Id, _notes);
+                _createdSubmissionId = submission.Id;
+                _submissionCreated = true;
+            }
+            catch (Exception ex)
+            {
+                _errorMessage = $"Failed to create submission: {ex.Message}";
+                return;
+            }
+        }
+
+        _errorMessage = null;
+        _currentStep = 3;
+        _step3Reached = true;
+    }
+
+    private void GoToStep(int step)
+    {
+        if (step == 2 && _selectedCard is null)
+        {
+            _errorMessage = "Please select a card first.";
+            return;
+        }
+
+        _errorMessage = null;
+        _currentStep = step;
+
+        if (step >= 3)
+            _step3Reached = true;
+    }
+
+    private void HandleFrontUploaded(CardImage cardImage)
+    {
+        _frontUploaded = true;
+        StartPollingIfNeeded();
+    }
+
+    private void HandleBackUploaded(CardImage cardImage)
+    {
+        _backUploaded = true;
+        StartPollingForNewImage();
+    }
+
+    private void HandleFrontLocalImageReady(string dataUrl)
+    {
+        _frontLocalDataUrl = dataUrl;
+    }
+
+    private void HandleBackLocalImageReady(string dataUrl)
+    {
+        _backLocalDataUrl = dataUrl;
+    }
+
+    /// <summary>
+    /// Start polling when no poll is running yet (first image uploaded).
+    /// </summary>
+    private void StartPollingIfNeeded()
+    {
+        if (_isWaitingForAnalysis)
+            return;
+
+        _isWaitingForAnalysis = true;
+        _pollingCts = new CancellationTokenSource();
+        _ = PollForAnalysisResultsAsync(_pollingCts.Token);
+    }
+
+    /// <summary>
+    /// Restart polling when a new image is uploaded after analysis already completed
+    /// for a previous image. This ensures the overlay editor appears for the new image.
+    /// </summary>
+    private void StartPollingForNewImage()
+    {
+        // If already polling, it will pick up the new image automatically.
+        if (_isWaitingForAnalysis)
+            return;
+
+        // Scores exist from a previous image — need to re-poll for the new one.
+        _isWaitingForAnalysis = true;
+        _pollingCts?.Cancel();
+        _pollingCts?.Dispose();
+        _pollingCts = new CancellationTokenSource();
+        _ = PollForAnalysisResultsAsync(_pollingCts.Token);
+    }
+
+    private async Task PollForAnalysisResultsAsync(CancellationToken ct)
+    {
+        const int maxAttempts = 60; // 60 × 2s = 2 minute timeout
+        var attempts = 0;
+        var expectedCount = (_frontUploaded ? 1 : 0) + (_backUploaded ? 1 : 0);
+
+        try
+        {
+            while (!ct.IsCancellationRequested && attempts < maxAttempts)
+            {
+                await Task.Delay(2000, ct);
+                attempts++;
+
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                var service = scope.ServiceProvider.GetRequiredService<CardSubmissionService>();
+                var submission = await service.GetSubmissionReadOnlyAsync(
+                    _createdSubmissionId, _userId, ct);
+
+                if (submission?.ImageDerivedScores is null)
+                    continue;
+
+                var dto = service.MapToDto(submission);
+                var analyzed = dto.Images.Where(i => i.IsAnalyzed).ToList();
+
+                // Wait until all uploaded images have been analyzed
+                if (analyzed.Count < expectedCount)
+                    continue;
+
+                _imageDerivedScores = submission.ImageDerivedScores;
+                _isWaitingForAnalysis = false;
+
+                ApplyImageScoresToSliders(submission.ImageDerivedScores);
+                _imageScoresApplied = true;
+
+                _analyzedImages = analyzed;
+
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            if (attempts >= maxAttempts)
+            {
+                _errorMessage = "Image analysis is taking longer than expected. Please try again.";
+                _isWaitingForAnalysis = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on dispose
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error checking analysis status: {ex.Message}";
+            _isWaitingForAnalysis = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UseImageScores()
+    {
+        if (_imageDerivedScores is null)
+            return;
+
+        ApplyImageScoresToSliders(_imageDerivedScores);
+        _imageScoresApplied = true;
+    }
+
+    private async Task HandleCorrectionSubmitted(UserCorrection correction)
+    {
+        _errorMessage = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetRequiredService<CardSubmissionService>();
+            await service.ApplyUserCorrectionAsync(
+                _createdSubmissionId, _userId, correction);
+
+            // Reload submission to get updated scores
+            var submission = await service.GetSubmissionReadOnlyAsync(
+                _createdSubmissionId, _userId);
+
+            if (submission?.ImageDerivedScores is not null)
+            {
+                _imageDerivedScores = submission.ImageDerivedScores;
+                ApplyImageScoresToSliders(submission.ImageDerivedScores);
+            }
+
+            // Refresh overlay images
+            if (submission is not null)
+            {
+                var dto = service.MapToDto(submission);
+                _analyzedImages = dto.Images.Where(i => i.IsAnalyzed).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Recalculation failed: {ex.Message}";
+        }
+    }
+
+    private void ApplyImageScoresToSliders(ConditionScores scores)
+    {
+        _centeringLeftRightFront = scores.Centering.LeftRightFront;
+        _centeringTopBottomFront = scores.Centering.TopBottomFront;
+        _centeringLeftRightBack = scores.Centering.LeftRightBack;
+        _centeringTopBottomBack = scores.Centering.TopBottomBack;
+        _corners = scores.Corners;
+        _edges = scores.Edges;
+        _surface = scores.Surface;
+    }
+
+    private bool CanProceedToReview()
+    {
+        if (_inputMethod == InputMethod.Images)
+        {
+            return _imageScoresApplied || _imageDerivedScores is not null;
+        }
+
+        return true;
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_selectedCard is null)
+        {
+            _errorMessage = "No card selected.";
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_userId))
+        {
+            _errorMessage = "Unable to identify the current user.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetRequiredService<CardSubmissionService>();
+
+            if (!_submissionCreated)
+            {
+                var submission = await service.CreateSubmissionAsync(
+                    _userId, _selectedCard.Id, _notes);
+                _createdSubmissionId = submission.Id;
+                _submissionCreated = true;
+            }
+
+            if (_inputMethod == InputMethod.Images && _imageDerivedScores is not null)
+            {
+                await service.SetFinalScoresAndEstimateAsync(
+                    _createdSubmissionId, _userId, _imageDerivedScores);
+            }
+            else
+            {
+                var scores = new ConditionScores
+                {
+                    Centering = new CenteringMeasurement
+                    {
+                        LeftRightFront = _centeringLeftRightFront,
+                        TopBottomFront = _centeringTopBottomFront,
+                        LeftRightBack = _centeringLeftRightBack,
+                        TopBottomBack = _centeringTopBottomBack
+                    },
+                    Corners = _corners,
+                    Edges = _edges,
+                    Surface = _surface
+                };
+
+                await service.SetManualScoresAndEstimateAsync(
+                    _createdSubmissionId, _userId, scores);
+            }
+
+            NavigationManager.NavigateTo($"submissions/{_createdSubmissionId}");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Submission failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private double GetLiveEstimate()
+    {
+        // Use PSA MIN-based logic to match the final grade shown on submission detail.
+        var centering = new CenteringMeasurement
+        {
+            LeftRightFront = _centeringLeftRightFront,
+            TopBottomFront = _centeringTopBottomFront,
+            LeftRightBack = _centeringLeftRightBack,
+            TopBottomBack = _centeringTopBottomBack
+        };
+
+        var centeringGrade = CalculatePsaCenteringGrade(centering);
+        var cornersGrade = MapToPsaWholeGrade(_corners);
+        var edgesGrade = MapToPsaWholeGrade(_edges);
+        var surfaceGrade = MapToPsaWholeGrade(_surface);
+
+        return Math.Min(Math.Min(centeringGrade, cornersGrade),
+                        Math.Min(edgesGrade, surfaceGrade));
+    }
+
+    private static int CalculatePsaCenteringGrade(CenteringMeasurement centering)
+    {
+        var frontDeviation = centering.FrontRatio.Larger;
+        var backDeviation = centering.BackRatio.Larger;
+
+        return frontDeviation switch
+        {
+            <= 55 when backDeviation <= 75 => 10,
+            <= 60 when backDeviation <= 75 => 9,
+            <= 65 when backDeviation <= 80 => 8,
+            <= 70 when backDeviation <= 85 => 7,
+            <= 75 when backDeviation <= 90 => 6,
+            <= 80 => 5,
+            <= 85 => 4,
+            <= 90 => 3,
+            _ => 2
+        };
+    }
+
+    private static int MapToPsaWholeGrade(double score) => score switch
+    {
+        >= 9.5 => 10,
+        >= 8.5 => 9,
+        >= 7.5 => 8,
+        >= 6.5 => 7,
+        >= 5.5 => 6,
+        >= 4.5 => 5,
+        >= 3.5 => 4,
+        >= 2.5 => 3,
+        >= 1.5 => 2,
+        _ => 1
+    };
+
+    private int GetLiveConfidence()
+    {
+        var baseConf = 60;
+        if (_imageScoresApplied || _imageDerivedScores is not null)
+            baseConf += 25;
+        return baseConf;
+    }
+
+    private string GetMethodLabel() => _inputMethod switch
+    {
+        InputMethod.Both => "Photos + manual",
+        InputMethod.Images => "Photos",
+        _ => "Manual"
+    };
+
+    private static string GetGradeLabel(double grade) => grade switch
+    {
+        >= 10 => "Gem Mint",
+        >= 9 => "Mint",
+        >= 8 => "NM-MT",
+        >= 7 => "Near Mint",
+        >= 6 => "EX-MT",
+        >= 5 => "Excellent",
+        >= 4 => "VG-EX",
+        >= 3 => "VG",
+        >= 2 => "Good",
+        _ => "Poor"
+    };
+
+    public void Dispose()
+    {
+        _pollingCts?.Cancel();
+        _pollingCts?.Dispose();
+    }
+
+    private enum InputMethod
+    {
+        Images,
+        Manual,
+        Both
+    }
+}

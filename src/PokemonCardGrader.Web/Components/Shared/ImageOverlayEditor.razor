@@ -1,0 +1,522 @@
+@using PokemonCardGrader.Domain.ValueObjects
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ILogger<ImageOverlayEditor> Logger
+
+<div class="overlay-editor" style="position:relative;display:inline-block;max-width:100%">
+    <div style="position:relative">
+        <img @ref="_imgRef" src="@EffectiveImageSrc" alt="Card analysis overlay"
+             style="width:100%;display:block;border-radius:8px" />
+
+        <canvas @ref="_canvasRef"
+                style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:8px" />
+    </div>
+
+    @* Boundary status indicator *@
+    @if (ImmediateMode)
+    {
+        <div style="margin-top:6px;display:flex;align-items:center;gap:6px">
+            @switch (_boundaryStatus)
+            {
+                case BoundaryDetectionStatus.AutoDetected:
+                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sage,#22c55e)"></span>
+                    <span style="font-size:11px;color:var(--sage,#22c55e)">Auto-detected</span>
+                    break;
+                case BoundaryDetectionStatus.BackendRefined:
+                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
+                    <span style="font-size:11px;color:var(--accent,#6366f1)">Backend-refined</span>
+                    break;
+                default:
+                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber,#f59e0b)"></span>
+                    <span style="font-size:11px;color:var(--amber,#f59e0b)">Manual adjustment needed</span>
+                    break;
+            }
+            <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag corners to adjust card boundary)</span>
+        </div>
+    }
+
+    @* Centering readouts + rotation controls — always visible in immediate mode *@
+    @if (_showControls)
+    {
+        <div class="centering-inline-panel">
+            <span class="centering-inline-readout">
+                <span style="opacity:0.6">L/R</span> @_lrPercent
+            </span>
+            <span class="centering-inline-readout">
+                <span style="opacity:0.6">T/B</span> @_tbPercent
+            </span>
+
+            @* Percentage guide toggle *@
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-3);cursor:pointer;margin-left:8px">
+                <input type="checkbox" @bind="_percentGuidesVisible" @bind:after="HandlePercentGuidesToggle"
+                       style="width:14px;height:14px" />
+                Guides
+            </label>
+
+            <span style="font-size:12px;color:var(--ink-3);flex-shrink:0;margin-left:auto">Rotation</span>
+            <input type="range" class="slider" min="-10" max="10" step="0.1"
+                   value="@_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)"
+                   @oninput="HandleRotationInput"
+                   style="flex:1;min-width:80px;max-width:160px" />
+            <span class="mono" style="font-size:12px;min-width:48px;text-align:right">
+                @(_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))&deg;
+            </span>
+            <button class="btn btn-ghost" style="padding:4px 8px;font-size:11px" @onclick="HandleResetRotation">
+                0&deg;
+            </button>
+        </div>
+    }
+
+    @* Defect dismiss controls below image *@
+    @if (DetectedDefects is { Count: > 0 })
+    {
+        <div style="margin-top:10px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3)">
+                    DETECTED DEFECTS
+                    <span style="font-weight:400;opacity:0.7;margin-left:6px">(click to dismiss false positives)</span>
+                </div>
+                <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:auto"
+                        @onclick="ToggleAllDefects">
+                    @(_dismissedDefects.Count == DetectedDefects!.Count ? "Restore all" : "Dismiss all")
+                </button>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+                @for (var i = 0; i < DetectedDefects.Count; i++)
+                {
+                    var idx = i;
+                    var d = DetectedDefects[i];
+                    var dismissed = _dismissedDefects.Contains(idx);
+                    var confidenceLevel = d.Confidence >= 0.7 ? "high" : d.Confidence >= 0.4 ? "medium" : "low";
+                    var confidenceColor = d.Confidence >= 0.7 ? "var(--rose, #f43f5e)" : d.Confidence >= 0.4 ? "var(--amber, #f59e0b)" : "var(--ink-3, #94a3b8)";
+                    <button class="chip @(dismissed ? "dismissed" : "danger")"
+                            style="font-size:11px;cursor:pointer;@(dismissed ? "opacity:0.4;text-decoration:line-through" : "")"
+                            title="@($"Confidence: {d.Confidence:P0} ({confidenceLevel})")"
+                            @onclick="() => ToggleDefect(idx)">
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:@(dismissed ? "var(--ink-3)" : confidenceColor);flex-shrink:0"></span>
+                        @d.Type
+                        <span class="mono" style="font-size:10px;opacity:0.7">@confidenceLevel</span>
+                        @if (!dismissed)
+                        {
+                            <span style="margin-left:4px;font-weight:bold">&times;</span>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+    }
+
+    @if (_hasChanges)
+    {
+        <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            @if (_isRecalculating)
+            {
+                <span style="font-size:12px;color:var(--ink-3)">Recalculating…</span>
+            }
+            else
+            {
+                <span style="font-size:11px;color:var(--sage)">&#10003; Scores updated</span>
+            }
+            <button class="btn btn-ghost" style="font-size:12px;margin-left:auto" @onclick="Reset">
+                Reset
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string ImageUrl { get; set; } = string.Empty;
+    [Parameter] public string? LocalImageDataUrl { get; set; }
+    [Parameter] public bool ImmediateMode { get; set; }
+    [Parameter] public AnalysisOverlay? Overlay { get; set; }
+    [Parameter] public List<DetectedDefect>? DetectedDefects { get; set; }
+    [Parameter] public Guid CardImageId { get; set; }
+    [Parameter] public EventCallback<UserCorrection> OnCorrectionSubmitted { get; set; }
+
+    private ElementReference _imgRef;
+    private ElementReference _canvasRef;
+    private IJSObjectReference? _jsInstance;
+    private DotNetObjectReference<ImageOverlayEditor>? _dotNetRef;
+
+    private BorderLines? _adjustedBorders;
+    private List<NormalizedPoint>? _adjustedBoundary;
+    private readonly HashSet<int> _dismissedDefects = [];
+    private bool _hasChanges;
+    private bool _isRecalculating;
+    private Guid _previousCardImageId;
+    private bool _dataNeedsSync;
+    private CancellationTokenSource? _autoSubmitCts;
+    private bool _clientDetectionDone;
+
+    private double _rotation;
+    private string _lrPercent = "50/50";
+    private string _tbPercent = "50/50";
+    private bool _percentGuidesVisible;
+    private BoundaryDetectionStatus _boundaryStatus = BoundaryDetectionStatus.Default;
+    private AnalysisOverlay? _previousOverlay;
+
+    private string EffectiveImageSrc => LocalImageDataUrl ?? ImageUrl;
+
+    private bool _showControls =>
+        ImmediateMode ||
+        (Overlay?.CardBoundary is { Count: 4 } && Overlay.BorderLines is not null);
+
+    private object BuildJsData()
+    {
+        var boundary = Overlay?.CardBoundary?
+            .Select(p => new double[] { p.X, p.Y }).ToArray();
+
+        var borders = _adjustedBorders ?? Overlay?.BorderLines ?? new BorderLines
+        {
+            LeftBorderX = 0.05,
+            RightBorderX = 0.95,
+            TopBorderY = 0.05,
+            BottomBorderY = 0.95
+        };
+
+        var defects = DetectedDefects?.Select(d => new
+        {
+            type = d.Type,
+            severity = d.Severity,
+            confidence = d.Confidence,
+            x = d.X,
+            y = d.Y,
+            w = d.Width,
+            h = d.Height
+        }).ToArray();
+
+        return new
+        {
+            boundary,
+            borders = new
+            {
+                left = borders.LeftBorderX,
+                right = borders.RightBorderX,
+                top = borders.TopBorderY,
+                bottom = borders.BottomBorderY
+            },
+            defects,
+            rotation = _rotation
+        };
+    }
+
+    // --- Lifecycle ---
+
+    protected override void OnParametersSet()
+    {
+        if (CardImageId != _previousCardImageId)
+        {
+            _adjustedBorders = null;
+            _adjustedBoundary = null;
+            _dismissedDefects.Clear();
+            _hasChanges = false;
+            _rotation = 0;
+            _lrPercent = "50/50";
+            _tbPercent = "50/50";
+            _previousCardImageId = CardImageId;
+            _clientDetectionDone = false;
+            _boundaryStatus = BoundaryDetectionStatus.Default;
+            _dataNeedsSync = true;
+        }
+
+        // When backend overlay arrives, update the boundary
+        if (Overlay is not null && Overlay != _previousOverlay &&
+            Overlay.CardBoundary is { Count: 4 })
+        {
+            _previousOverlay = Overlay;
+            _boundaryStatus = BoundaryDetectionStatus.BackendRefined;
+            _dataNeedsSync = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _previousCardImageId = CardImageId;
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _jsInstance = await JS.InvokeAsync<IJSObjectReference>(
+                "cardOverlay.init", _dotNetRef, _canvasRef, _imgRef, BuildJsData());
+            _dataNeedsSync = false;
+
+            // In immediate mode, run client-side detection
+            if (ImmediateMode && !_clientDetectionDone)
+            {
+                await RunClientSideDetection();
+            }
+        }
+        else if (_dataNeedsSync && _jsInstance is not null)
+        {
+            _dataNeedsSync = false;
+
+            // If backend data arrived, use setBoundary for a refined update
+            if (_boundaryStatus == BoundaryDetectionStatus.BackendRefined &&
+                Overlay?.CardBoundary is { Count: 4 })
+            {
+                var corners = Overlay.CardBoundary
+                    .Select(p => new double[] { p.X, p.Y }).ToArray();
+                await _jsInstance.InvokeVoidAsync("setBoundary", (object)corners);
+
+                // Also update full data (borders, defects)
+                await _jsInstance.InvokeVoidAsync("updateData", BuildJsData());
+            }
+            else
+            {
+                await _jsInstance.InvokeVoidAsync("updateData", BuildJsData());
+            }
+        }
+    }
+
+    private async Task RunClientSideDetection()
+    {
+        _clientDetectionDone = true;
+
+        try
+        {
+            var corners = await JS.InvokeAsync<double[][]?>(
+                "cardBorderDetect.detect", _imgRef);
+
+            if (corners is { Length: 4 } && _jsInstance is not null)
+            {
+                await _jsInstance.InvokeVoidAsync("setBoundary", (object)corners);
+                _boundaryStatus = BoundaryDetectionStatus.AutoDetected;
+            }
+            else
+            {
+                _boundaryStatus = BoundaryDetectionStatus.Default;
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Client-side card detection failed");
+            _boundaryStatus = BoundaryDetectionStatus.Default;
+        }
+    }
+
+    // --- JS callbacks ---
+
+    [JSInvokable]
+    public async Task OnBorderDragEnd(double left, double right, double top, double bottom)
+    {
+        _adjustedBorders = new BorderLines
+        {
+            LeftBorderX = Math.Clamp(left, 0, 1),
+            RightBorderX = Math.Clamp(right, 0, 1),
+            TopBorderY = Math.Clamp(top, 0, 1),
+            BottomBorderY = Math.Clamp(bottom, 0, 1)
+        };
+
+        Logger.LogInformation("OnBorderDragEnd: L={L:F4} R={R:F4} T={T:F4} B={B:F4} (image={ImageId})",
+            left, right, top, bottom, CardImageId);
+
+        _hasChanges = true;
+        StateHasChanged();
+        await AutoSubmitCorrection();
+    }
+
+    [JSInvokable]
+    public async Task OnBoundaryDragEnd(double[][] corners)
+    {
+        _adjustedBoundary = corners.Select(p => new NormalizedPoint
+        {
+            X = Math.Clamp(p[0], 0, 1),
+            Y = Math.Clamp(p[1], 0, 1)
+        }).ToList();
+
+        _boundaryStatus = BoundaryDetectionStatus.AutoDetected;
+
+        Logger.LogInformation("OnBoundaryDragEnd: {Count} corners (image={ImageId})",
+            corners.Length, CardImageId);
+
+        _hasChanges = true;
+        StateHasChanged();
+        await AutoSubmitCorrection();
+    }
+
+    [JSInvokable]
+    public void OnCenteringUpdated(string lr, string tb)
+    {
+        _lrPercent = lr;
+        _tbPercent = tb;
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnRotationDetected(double degrees)
+    {
+        _rotation = degrees;
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnDragCancelled()
+    {
+        // Pointer left the window — no state change needed
+    }
+
+    // --- Rotation ---
+
+    private async Task HandleRotationInput(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var deg))
+        {
+            _rotation = deg;
+            if (_jsInstance is not null)
+                await _jsInstance.InvokeVoidAsync("setRotation", deg);
+        }
+    }
+
+    private async Task HandleResetRotation()
+    {
+        _rotation = 0;
+        if (_jsInstance is not null)
+            await _jsInstance.InvokeVoidAsync("setRotation", 0);
+    }
+
+    // --- Percentage guides ---
+
+    private async Task HandlePercentGuidesToggle()
+    {
+        if (_jsInstance is not null)
+        {
+            await _jsInstance.InvokeVoidAsync("setPercentGuides",
+                _percentGuidesVisible,
+                new[] { 0.45, 0.50, 0.55 });
+        }
+    }
+
+    // --- Defects ---
+
+    private async Task ToggleAllDefects()
+    {
+        if (DetectedDefects is not { Count: > 0 }) return;
+
+        var dismissAll = _dismissedDefects.Count < DetectedDefects.Count;
+
+        if (dismissAll)
+        {
+            for (var i = 0; i < DetectedDefects.Count; i++)
+            {
+                if (_dismissedDefects.Add(i) && _jsInstance is not null)
+                    await _jsInstance.InvokeVoidAsync("dismiss", i);
+            }
+        }
+        else
+        {
+            var indices = _dismissedDefects.OrderByDescending(i => i).ToList();
+            _dismissedDefects.Clear();
+            foreach (var i in indices)
+            {
+                if (_jsInstance is not null)
+                    await _jsInstance.InvokeVoidAsync("undismiss", i);
+            }
+        }
+
+        _hasChanges = true;
+        await AutoSubmitCorrection();
+    }
+
+    private async Task ToggleDefect(int index)
+    {
+        if (!_dismissedDefects.Remove(index))
+        {
+            _dismissedDefects.Add(index);
+            if (_jsInstance is not null)
+                await _jsInstance.InvokeVoidAsync("dismiss", index);
+        }
+        else
+        {
+            if (_jsInstance is not null)
+                await _jsInstance.InvokeVoidAsync("undismiss", index);
+        }
+        _hasChanges = true;
+        await AutoSubmitCorrection();
+    }
+
+    // --- Auto-submit ---
+
+    private async Task AutoSubmitCorrection()
+    {
+        _autoSubmitCts?.Cancel();
+        _autoSubmitCts?.Dispose();
+        _autoSubmitCts = new CancellationTokenSource();
+
+        _isRecalculating = true;
+        StateHasChanged();
+
+        var correction = new UserCorrection
+        {
+            CardImageId = CardImageId,
+            AdjustedBoundary = _adjustedBoundary,
+            AdjustedBorders = _adjustedBorders,
+            DismissedDefectIndices = _dismissedDefects.OrderBy(i => i).ToList()
+        };
+
+        Logger.LogInformation(
+            "AutoSubmitCorrection: image={ImageId} hasBorders={HasBorders} hasBoundary={HasBoundary} dismissed={Dismissed}" +
+            (correction.AdjustedBorders is { } b
+                ? $" borders=[L={b.LeftBorderX:F4} R={b.RightBorderX:F4} T={b.TopBorderY:F4} B={b.BottomBorderY:F4}]"
+                : ""),
+            CardImageId,
+            correction.AdjustedBorders is not null,
+            correction.AdjustedBoundary is not null,
+            correction.DismissedDefectIndices.Count);
+
+        await OnCorrectionSubmitted.InvokeAsync(correction);
+
+        _isRecalculating = false;
+        StateHasChanged();
+    }
+
+    private async Task Reset()
+    {
+        _adjustedBorders = null;
+        _adjustedBoundary = null;
+        _dismissedDefects.Clear();
+        _hasChanges = false;
+        _rotation = 0;
+        _lrPercent = "50/50";
+        _tbPercent = "50/50";
+
+        if (_jsInstance is not null)
+            await _jsInstance.InvokeVoidAsync("reset", BuildJsData());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _autoSubmitCts?.Cancel();
+        _autoSubmitCts?.Dispose();
+
+        var js = _jsInstance;
+        _jsInstance = null;
+
+        if (js is not null)
+        {
+            try
+            {
+                await js.InvokeVoidAsync("dispose");
+            }
+            catch (JSDisconnectedException) { }
+            catch (ObjectDisposedException) { }
+
+            try
+            {
+                await js.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        _dotNetRef?.Dispose();
+    }
+
+    private enum BoundaryDetectionStatus
+    {
+        Default,
+        AutoDetected,
+        BackendRefined
+    }
+}

@@ -1,0 +1,176 @@
+@page "/graded"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using PokemonCardGrader.Application.DTOs
+@using PokemonCardGrader.Application.Services
+@inject CardSubmissionService CardSubmissionService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Graded Cards - Pokemon Card Grader</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Graded Cards</h2>
+    <a href="submissions" class="btn btn-outline-secondary">All Submissions</a>
+</div>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger">@_errorMessage</div>
+}
+else if (_isLoading)
+{
+    <p><em>Loading graded cards...</em></p>
+}
+else if (_gradedSubmissions.Count == 0)
+{
+    <div class="alert alert-info">
+        No graded cards yet. Once you receive your grades back, record them on a
+        <a href="submissions">submission's detail page</a>.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Card</th>
+                    <th>Set</th>
+                    <th>Number</th>
+                    <th>Company</th>
+                    <th>Grade</th>
+                    <th>Cert #</th>
+                    <th>Recorded</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var sub in _gradedSubmissions)
+                {
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                @if (!string.IsNullOrEmpty(sub.CardImageUrl))
+                                {
+                                    <img src="@sub.CardImageUrl"
+                                         alt="@sub.CardName"
+                                         style="height: 40px; object-fit: contain;"
+                                         class="me-2" />
+                                }
+                                @sub.CardName
+                            </div>
+                        </td>
+                        <td>@sub.SetName</td>
+                        <td>@sub.Number</td>
+                        <td><strong>@sub.ActualResult!.Company</strong></td>
+                        <td>
+                            <span class="badge bg-success fs-6">@sub.ActualResult.ActualGrade</span>
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(sub.ActualResult.CertificationNumber))
+                            {
+                                @sub.ActualResult.CertificationNumber
+                            }
+                            else
+                            {
+                                <span class="text-muted">--</span>
+                            }
+                        </td>
+                        <td>@sub.ActualResult.RecordedAt.LocalDateTime.ToShortDateString()</td>
+                        <td>
+                            <a href="submissions/@sub.Id" class="btn btn-sm btn-outline-secondary">View</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <nav aria-label="Graded cards pagination">
+        <ul class="pagination justify-content-center">
+            <li class="page-item @(_currentPage <= 1 ? "disabled" : "")">
+                <button class="page-link" @onclick="PreviousPageAsync" disabled="@(_currentPage <= 1)">Previous</button>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link">Page @_currentPage</span>
+            </li>
+            <li class="page-item @(!_hasMorePages ? "disabled" : "")">
+                <button class="page-link" @onclick="NextPageAsync" disabled="@(!_hasMorePages)">Next</button>
+            </li>
+        </ul>
+    </nav>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private List<CardSubmissionDto> _gradedSubmissions = [];
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private int _currentPage = 1;
+    private bool _hasMorePages;
+    private const int PageSize = 20;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGradedCardsAsync();
+    }
+
+    private async Task LoadGradedCardsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var user = (await AuthState).User;
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                _errorMessage = "Unable to identify the current user.";
+                return;
+            }
+
+            var submissions = await CardSubmissionService.GetUserSubmissionsAsync(
+                userId, _currentPage, PageSize);
+
+            _gradedSubmissions = submissions
+                .Select(CardSubmissionService.MapToDto)
+                .Where(s => s.ActualResult is not null)
+                .ToList();
+
+            // If we filtered everything out but got a full page, there may be more
+            _hasMorePages = submissions.Count == PageSize;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load graded cards: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task PreviousPageAsync()
+    {
+        if (_currentPage > 1)
+        {
+            _currentPage--;
+            await LoadGradedCardsAsync();
+        }
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (_hasMorePages)
+        {
+            _currentPage++;
+            await LoadGradedCardsAsync();
+        }
+    }
+}

@@ -1,0 +1,18 @@
+@* Expandable sub-grade display for companies that provide sub-grades *@
+
+@if (SubGrades.Count > 0)
+{
+    <div class="d-flex flex-wrap gap-2">
+        @foreach (var (name, value) in SubGrades.OrderBy(sg => sg.Key))
+        {
+            <span class="badge bg-light text-dark border">
+                @name: @value.ToString("F1")
+            </span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Dictionary<string, double> SubGrades { get; set; } = new();
+    [Parameter] public GradingCompany Company { get; set; }
+}
