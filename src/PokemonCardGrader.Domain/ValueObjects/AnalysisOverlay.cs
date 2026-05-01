@@ -1,21 +1,13 @@
+using PokemonCardGrader.Domain.ValueObjects;
+
 namespace PokemonCardGrader.Domain.ValueObjects;
 
-/// <summary>
-/// Normalized overlay data from image analysis — card boundary and border line positions.
-/// All coordinates are 0-1 normalized relative to the original image dimensions.
-/// </summary>
 public sealed record AnalysisOverlay
 {
-    /// <summary>
-    /// Detected card boundary corners (4 points), normalized 0-1 relative to source image.
-    /// Order: top-left, top-right, bottom-right, bottom-left.
-    /// </summary>
-    public required List<NormalizedPoint> CardBoundary { get; init; }
-
-    /// <summary>
-    /// Detected inner border line positions, normalized 0-1 relative to the card region.
-    /// </summary>
-    public required BorderLines BorderLines { get; init; }
+    public List<NormalizedPoint> OuterGuides { get; init; } = [];
+    public List<NormalizedPoint> InnerGuides { get; init; } = [];
+    public double LeftRightCenteringPercent { get; init; } = 50.0;
+    public double TopBottomCenteringPercent { get; init; } = 50.0;
 }
 
 /// <summary>

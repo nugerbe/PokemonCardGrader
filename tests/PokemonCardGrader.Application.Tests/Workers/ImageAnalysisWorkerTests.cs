@@ -106,7 +106,7 @@ public sealed class ImageAnalysisWorkerTests
         _storageService.GetImageAsync("images/front.jpg", Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<Stream?>(new MemoryStream([1, 2, 3])));
         _analysisService.AnalyzeImageAsync(Arg.Any<Stream>(), Arg.Any<ImageType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
+            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
         _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
@@ -172,7 +172,7 @@ public sealed class ImageAnalysisWorkerTests
         _storageService.GetImageAsync("images/front.jpg", Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<Stream?>(new MemoryStream([1, 2, 3])));
         _analysisService.AnalyzeImageAsync(Arg.Any<Stream>(), Arg.Any<ImageType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
+            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
         _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
@@ -229,7 +229,7 @@ public sealed class ImageAnalysisWorkerTests
         _storageService.GetImageAsync("images/front.jpg", Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<Stream?>(new MemoryStream([1, 2, 3])));
         _analysisService.AnalyzeImageAsync(Arg.Any<Stream>(), Arg.Any<ImageType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
+            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
         _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())
@@ -310,7 +310,7 @@ public sealed class ImageAnalysisWorkerTests
                 DetectedDefects = [],
                 AnalyzedAt = DateTimeOffset.UtcNow,
                 AnalysisMethod = "test"
-            }, null)));
+            })));
         _submissionRepository.GetImageByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(null));
 
@@ -356,7 +356,7 @@ public sealed class ImageAnalysisWorkerTests
         _storageService.GetImageAsync("images/front.jpg", Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<Stream?>(new MemoryStream([1, 2, 3])));
         _analysisService.AnalyzeImageAsync(Arg.Any<Stream>(), Arg.Any<ImageType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult, null)));
+            .Returns(Task.FromResult(new ImageAnalysisOutcome(analysisResult)));
         _submissionRepository.GetImageByIdAsync(cardImage.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<CardImage?>(cardImage));
         _submissionRepository.GetImagesWithLatestAnalysisAsync(submissionId, Arg.Any<CancellationToken>())

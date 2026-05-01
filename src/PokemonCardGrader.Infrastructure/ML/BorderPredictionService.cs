@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using PokemonCardGrader.Application.Interfaces;
+using PokemonCardGrader.Domain.ValueObjects;
 
 namespace PokemonCardGrader.Infrastructure.ML;
 
@@ -53,8 +54,12 @@ public sealed class BorderPredictionService(
         var records = await repository.GetRecentUserCorrectionRecordsAsync(MaxSamples, ct);
 
         var withBorders = records
-            .Where(r => r.Result.Overlay?.BorderLines is not null)
-            .Select(r => r.Result.Overlay!.BorderLines)
+            .Where(r => r.Result.Overlay is not null
+                && r.Result.Overlay.OuterGuides.Count == 8
+                && r.Result.Overlay.InnerGuides.Count == 8)
+            .Select(r => DeriveBorderFractions(r.Result.Overlay!))
+            .Where(b => b is not null)
+            .Select(b => b!)
             .ToList();
 
         if (withBorders.Count < MinSamplesForPrior)
@@ -74,13 +79,9 @@ public sealed class BorderPredictionService(
         var medianTop = Median(tops);
         var medianBottom = Median(bottoms);
 
-        // Confidence based on sample count and consistency (low variance = high confidence)
-        var countFactor = Math.Min(withBorders.Count / 50.0, 1.0); // maxes out at 50 samples
-        var varianceFactor = 1.0 - Math.Min(
-            (Variance(lefts) + Variance(rights) + Variance(tops) + Variance(bottoms)) / 4.0
-            / 0.01, // normalize: variance of 0.01 (1% of card) → factor goes to 0
-            1.0);
-        var confidence = Math.Clamp(countFactor * 0.6 + varianceFactor * 0.4, 0.05, 0.95);
+        // Confidence based on sample count (maxes out at 50 samples)
+        var countFactor = Math.Min(withBorders.Count / 50.0, 1.0);
+        var confidence = Math.Clamp(countFactor, 0.05, 0.95);
 
         var prior = new BorderPrior
         {
@@ -108,10 +109,31 @@ public sealed class BorderPredictionService(
             : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 
-    private static double Variance(List<double> values)
+    private static BorderLines? DeriveBorderFractions(AnalysisOverlay overlay)
     {
-        if (values.Count < 2) return 0;
-        var mean = values.Average();
-        return values.Sum(v => (v - mean) * (v - mean)) / (values.Count - 1);
+        var outer = overlay.OuterGuides;
+        var inner = overlay.InnerGuides;
+
+        var outerMinX = outer.Min(p => p.X);
+        var outerMaxX = outer.Max(p => p.X);
+        var outerMinY = outer.Min(p => p.Y);
+        var outerMaxY = outer.Max(p => p.Y);
+        var outerWidth = outerMaxX - outerMinX;
+        var outerHeight = outerMaxY - outerMinY;
+
+        if (outerWidth <= 0 || outerHeight <= 0) return null;
+
+        var innerLeft = (inner[6].X + inner[7].X) / 2.0;
+        var innerRight = (inner[2].X + inner[3].X) / 2.0;
+        var innerTop = (inner[0].Y + inner[1].Y) / 2.0;
+        var innerBottom = (inner[4].Y + inner[5].Y) / 2.0;
+
+        return new BorderLines
+        {
+            LeftBorderX = (innerLeft - outerMinX) / outerWidth,
+            RightBorderX = (innerRight - outerMinX) / outerWidth,
+            TopBorderY = (innerTop - outerMinY) / outerHeight,
+            BottomBorderY = (innerBottom - outerMinY) / outerHeight
+        };
     }
 }

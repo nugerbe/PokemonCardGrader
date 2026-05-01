@@ -15,32 +15,11 @@ public sealed class CardAnalysisOptions
     /// <summary>Standard Pokemon card height in mm.</summary>
     public double CardHeightMm { get; set; } = 88.0;
 
-    /// <summary>Width of the normalized (perspective-corrected) card image in pixels.</summary>
+    /// <summary>Internal CV normalisation dimensions (width in pixels).</summary>
     public int NormalizedWidth { get; set; } = 630;
 
-    /// <summary>Height of the normalized card image in pixels.</summary>
+    /// <summary>Internal CV normalisation dimensions (height in pixels).</summary>
     public int NormalizedHeight { get; set; } = 880;
-
-    /// <summary>
-    /// JPEG quality (50-100) used when encoding the normalized card image for
-    /// client delivery. Default 85 keeps file size around 60-100 KB while
-    /// preserving the detail needed for centering inspection.
-    /// </summary>
-    public int NormalizedImageJpegQuality { get; set; } = 85;
-
-    /// <summary>
-    /// Inset of the card within the rectified output image, as a fraction of
-    /// the output dimensions on each side. Implemented via an "expanded warp"
-    /// in <see cref="ImageAnalysis.CardNormalizer.NormalizeWithExpansion"/>:
-    /// the detected quad maps to a centered inset rectangle inside the W×H
-    /// output, leaving a margin filled with source-image pixels OUTSIDE the
-    /// detected card boundary. This serves two purposes: (1) gives the user
-    /// a visible reference for the actual card edge, and (2) recovers the
-    /// outer card border in cases where detection undershot to the inner
-    /// artwork frame. Default 0.10 = card occupies central 80% of display.
-    /// Analyzer always operates on the unpadded card-tight Mat.
-    /// </summary>
-    public double NormalizedPaddingFraction { get; set; } = 0.10;
 
     /// <summary>Derived aspect ratio (width / height).</summary>
     public double CardAspectRatio => CardWidthMm / CardHeightMm;

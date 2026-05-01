@@ -30,8 +30,8 @@ public sealed class ImageAnalysisRecordConfiguration : IEntityTypeConfiguration<
             ar.OwnsMany(x => x.MlDetectedDefects);
             ar.OwnsOne(x => x.Overlay, o =>
             {
-                o.OwnsMany(ov => ov.CardBoundary);
-                o.OwnsOne(ov => ov.BorderLines);
+                o.OwnsMany(ov => ov.OuterGuides);
+                o.OwnsMany(ov => ov.InnerGuides);
             });
             ar.OwnsOne(x => x.ConfidenceDetail);
             ar.OwnsOne(x => x.QualityAssessment);

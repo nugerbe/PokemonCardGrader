@@ -128,10 +128,10 @@ public sealed class AnalysisDataLogger(
                 SurfaceModelUsed = result.SurfaceModelUsed,
                 DefectCount = result.DetectedDefects.Count,
                 MlDefectCount = result.MlDetectedDefects.Count,
-                BorderLeft = result.Overlay?.BorderLines.LeftBorderX,
-                BorderRight = result.Overlay?.BorderLines.RightBorderX,
-                BorderTop = result.Overlay?.BorderLines.TopBorderY,
-                BorderBottom = result.Overlay?.BorderLines.BottomBorderY,
+                BorderLeft = DeriveBorderLeft(result.Overlay),
+                BorderRight = DeriveBorderRight(result.Overlay),
+                BorderTop = DeriveBorderTop(result.Overlay),
+                BorderBottom = DeriveBorderBottom(result.Overlay),
                 Defects = result.DetectedDefects.Select(MapDefect).ToList(),
                 MlDefects = result.MlDetectedDefects.Select(MapDefect).ToList()
             };
@@ -158,16 +158,18 @@ public sealed class AnalysisDataLogger(
                 return;
             }
 
+            var (lFrac, rFrac, tFrac, bFrac) = DeriveBorderFractionsFromCorrection(correction);
+
             var correctionData = new CorrectionRecord
             {
                 CorrectedAt = DateTimeOffset.UtcNow,
-                HasAdjustedBoundary = correction.AdjustedBoundary is { Count: > 0 },
-                HasAdjustedBorders = correction.AdjustedBorders is not null,
-                DismissedDefectCount = correction.DismissedDefectIndices.Count,
-                AdjustedBorderLeft = correction.AdjustedBorders?.LeftBorderX,
-                AdjustedBorderRight = correction.AdjustedBorders?.RightBorderX,
-                AdjustedBorderTop = correction.AdjustedBorders?.TopBorderY,
-                AdjustedBorderBottom = correction.AdjustedBorders?.BottomBorderY
+                HasAdjustedBoundary = correction.OuterGuides.Count == 8,
+                HasAdjustedBorders = correction.InnerGuides.Count == 8,
+                DismissedDefectCount = 0,  // line-guide editor has no defect-dismiss action
+                AdjustedBorderLeft = lFrac,
+                AdjustedBorderRight = rFrac,
+                AdjustedBorderTop = tFrac,
+                AdjustedBorderBottom = bFrac
             };
 
             var json = System.Text.Json.JsonSerializer.Serialize(correctionData, JsonOpts);
@@ -234,17 +236,19 @@ public sealed class AnalysisDataLogger(
         {
             var dir = EnsureLearningDir(submissionId);
 
+            var (lFrac2, rFrac2, tFrac2, bFrac2) = DeriveBorderFractionsFromCorrection(correction);
+
             var record = new LearningCorrectionRecord
             {
                 CorrectedAt = DateTimeOffset.UtcNow,
-                HasAdjustedBorders = correction.AdjustedBorders is not null,
-                HasAdjustedBoundary = correction.AdjustedBoundary is { Count: > 0 },
-                DismissedDefectCount = correction.DismissedDefectIndices.Count,
-                DismissedIndices = correction.DismissedDefectIndices,
-                AdjustedBorderLeft = correction.AdjustedBorders?.LeftBorderX,
-                AdjustedBorderRight = correction.AdjustedBorders?.RightBorderX,
-                AdjustedBorderTop = correction.AdjustedBorders?.TopBorderY,
-                AdjustedBorderBottom = correction.AdjustedBorders?.BottomBorderY
+                HasAdjustedBorders = correction.InnerGuides.Count == 8,
+                HasAdjustedBoundary = correction.OuterGuides.Count == 8,
+                DismissedDefectCount = 0,
+                DismissedIndices = [],
+                AdjustedBorderLeft = lFrac2,
+                AdjustedBorderRight = rFrac2,
+                AdjustedBorderTop = tFrac2,
+                AdjustedBorderBottom = bFrac2
             };
 
             var json = System.Text.Json.JsonSerializer.Serialize(record, JsonOpts);
@@ -377,6 +381,85 @@ public sealed class AnalysisDataLogger(
         public double? ActualGrade { get; init; }
         public string? ActualCompany { get; init; }
         public double? Error { get; init; }
+    }
+
+    /// <summary>
+    /// Derives the legacy left-border fraction (0-1, relative to outer-guide
+    /// bbox width) from the line-guide overlay. Used solely to keep the
+    /// metrics-log schema stable across the rectified-view → line-guide
+    /// migration; null when the overlay isn't well-formed.
+    /// </summary>
+    private static double? DeriveBorderLeft(AnalysisOverlay? overlay)
+    {
+        if (overlay is null || overlay.OuterGuides.Count != 8 || overlay.InnerGuides.Count != 8) return null;
+        var (minX, _, maxX, _) = OuterBbox(overlay.OuterGuides);
+        var width = maxX - minX;
+        if (width <= 0) return null;
+        var innerLeft = (overlay.InnerGuides[6].X + overlay.InnerGuides[7].X) / 2.0;
+        return (innerLeft - minX) / width;
+    }
+
+    private static double? DeriveBorderRight(AnalysisOverlay? overlay)
+    {
+        if (overlay is null || overlay.OuterGuides.Count != 8 || overlay.InnerGuides.Count != 8) return null;
+        var (minX, _, maxX, _) = OuterBbox(overlay.OuterGuides);
+        var width = maxX - minX;
+        if (width <= 0) return null;
+        var innerRight = (overlay.InnerGuides[2].X + overlay.InnerGuides[3].X) / 2.0;
+        return (innerRight - minX) / width;
+    }
+
+    private static double? DeriveBorderTop(AnalysisOverlay? overlay)
+    {
+        if (overlay is null || overlay.OuterGuides.Count != 8 || overlay.InnerGuides.Count != 8) return null;
+        var (_, minY, _, maxY) = OuterBbox(overlay.OuterGuides);
+        var height = maxY - minY;
+        if (height <= 0) return null;
+        var innerTop = (overlay.InnerGuides[0].Y + overlay.InnerGuides[1].Y) / 2.0;
+        return (innerTop - minY) / height;
+    }
+
+    private static double? DeriveBorderBottom(AnalysisOverlay? overlay)
+    {
+        if (overlay is null || overlay.OuterGuides.Count != 8 || overlay.InnerGuides.Count != 8) return null;
+        var (_, minY, _, maxY) = OuterBbox(overlay.OuterGuides);
+        var height = maxY - minY;
+        if (height <= 0) return null;
+        var innerBottom = (overlay.InnerGuides[4].Y + overlay.InnerGuides[5].Y) / 2.0;
+        return (innerBottom - minY) / height;
+    }
+
+    private static (double MinX, double MinY, double MaxX, double MaxY) OuterBbox(IReadOnlyList<NormalizedPoint> outer)
+        => (outer.Min(p => p.X), outer.Min(p => p.Y), outer.Max(p => p.X), outer.Max(p => p.Y));
+
+    /// <summary>
+    /// Reduces a line-guide <see cref="UserCorrection"/> to the legacy
+    /// four-fraction shape (left/right border X relative to outer-guide
+    /// width; top/bottom border Y relative to outer-guide height) for
+    /// stable correction-log schema. Returns nulls when the correction
+    /// is malformed or the outer guide is degenerate.
+    /// </summary>
+    private static (double? Left, double? Right, double? Top, double? Bottom)
+        DeriveBorderFractionsFromCorrection(UserCorrection c)
+    {
+        if (c.OuterGuides.Count != 8 || c.InnerGuides.Count != 8) return (null, null, null, null);
+
+        var (minX, minY, maxX, maxY) = OuterBbox(c.OuterGuides);
+        var width = maxX - minX;
+        var height = maxY - minY;
+        if (width <= 0 || height <= 0) return (null, null, null, null);
+
+        var innerLeft = (c.InnerGuides[6].X + c.InnerGuides[7].X) / 2.0;
+        var innerRight = (c.InnerGuides[2].X + c.InnerGuides[3].X) / 2.0;
+        var innerTop = (c.InnerGuides[0].Y + c.InnerGuides[1].Y) / 2.0;
+        var innerBottom = (c.InnerGuides[4].Y + c.InnerGuides[5].Y) / 2.0;
+
+        return (
+            (innerLeft - minX) / width,
+            (innerRight - minX) / width,
+            (innerTop - minY) / height,
+            (innerBottom - minY) / height
+        );
     }
 }
 

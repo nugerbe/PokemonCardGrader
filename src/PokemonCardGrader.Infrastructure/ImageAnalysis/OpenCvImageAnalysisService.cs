@@ -12,9 +12,9 @@ namespace PokemonCardGrader.Infrastructure.ImageAnalysis;
 
 /// <summary>
 /// Orchestrates the card analysis pipeline by delegating to focused components:
-/// quality gate → detection → failure check → normalization → alignment →
-/// centering → regions → condition → advanced defects → features →
-/// ML inference → hybrid combine → confidence → overlay → debug.
+/// quality gate -> detection -> failure check -> normalization -> alignment ->
+/// centering -> regions -> condition -> advanced defects -> features ->
+/// ML inference -> hybrid combine -> confidence -> overlay -> debug.
 /// Integrates debug visualization and training-data logging when enabled.
 /// </summary>
 public sealed class OpenCvImageAnalysisService(
@@ -54,12 +54,12 @@ public sealed class OpenCvImageAnalysisService(
         if (src.Empty())
         {
             logger.LogWarning("Failed to decode image from stream ({ByteCount} bytes).", imageBytes.Length);
-            return EmptyOutcome();
+            return new(CreateEmptyResult());
         }
 
         logger.LogInformation("Image decoded: {Width}x{Height} pixels.", src.Width, src.Height);
 
-        // ── Phase 10: Image Quality Gate ──
+        // -- Phase 10: Image Quality Gate --
         var qualityAssessment = qualityAnalyzer.Assess(src);
         if (!qualityAssessment.PassedGate)
         {
@@ -67,27 +67,27 @@ public sealed class OpenCvImageAnalysisService(
                 "Image quality gate failed (score={Score:F2}): {Action}",
                 qualityAssessment.OverallScore, qualityAssessment.RecommendedAction);
 
-            return EmptyOutcome(CreateEmptyResult() with
+            return new(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 ImageQualityScore = qualityAssessment.OverallScore
             });
         }
 
-        // ── Step 1: Detect the card quadrilateral ──
+        // -- Step 1: Detect the card quadrilateral --
         var detection = detector.DetectWithMetadata(src);
         var cardQuad = detection?.Quad;
         debugViz.DrawCardDetection(src, cardQuad, imageType.ToString().ToLowerInvariant());
 
-        // ── Phase 21: Failure detection ──
+        // -- Phase 21: Failure detection --
         var failureResult = failureDetector.Detect(src, cardQuad, detection?.UsedFullFrameFallback ?? false);
 
         if (failureResult.HasBlockingFailure)
         {
-            logger.LogWarning("Blocking failure: {Type} — {Description}",
+            logger.LogWarning("Blocking failure: {Type} -- {Description}",
                 failureResult.FailureType, failureResult.Description);
 
-            return EmptyOutcome(CreateEmptyResult() with
+            return new(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 FailureDetection = failureResult,
@@ -98,53 +98,59 @@ public sealed class OpenCvImageAnalysisService(
         if (detection is null || cardQuad is null)
         {
             logger.LogWarning("Could not detect card quadrilateral in {Width}x{Height} image.", src.Width, src.Height);
-            return EmptyOutcome(CreateEmptyResult() with
+            return new(CreateEmptyResult() with
             {
                 QualityAssessment = qualityAssessment,
                 ImageQualityScore = qualityAssessment.OverallScore
             });
         }
 
-        // ── Step 2: Perspective-correct to normalized rectangle ──
+        // -- Step 2: Perspective-correct to normalized rectangle --
         using var rawNormalized = normalizer.Normalize(src, cardQuad);
 
-        // ── Phase 11: Alignment refinement ──
+        // -- Phase 11: Alignment refinement --
         using var normalized = alignmentRefiner.Refine(rawNormalized);
 
-        // ── Phase 12: Region segmentation ──
+        // -- Phase 12: Region segmentation --
         var regions = regionSegmenter.Segment(normalized.Width, normalized.Height);
 
-        // ── Step 3: Measure centering with border prior ──
+        // -- Step 3: Measure centering with border prior --
         BorderPrior? prior = null;
         try { prior = await borderPrediction.GetBorderPriorAsync(ct); }
         catch (Exception ex) { logger.LogWarning(ex, "Failed to load border prior; proceeding without it."); }
 
         var centeringResult = centeringAnalyzer.Measure(normalized, imageType, prior);
-        debugViz.DrawBorderLines(normalized, centeringResult.DetectedBorders ?? CreateDefaultBorders(), imageType.ToString().ToLowerInvariant());
+        debugViz.DrawBorderLines(normalized, centeringResult.DetectedBorders ?? new BorderLines
+        {
+            LeftBorderX = 0.05,
+            RightBorderX = 0.95,
+            TopBorderY = 0.05,
+            BottomBorderY = 0.95
+        }, imageType.ToString().ToLowerInvariant());
 
-        // ── Step 4: Analyze condition (surface, corners, edges, defects) via CV ──
+        // -- Step 4: Analyze condition (surface, corners, edges, defects) via CV --
         var condition = conditionAnalyzer.Analyze(normalized);
         debugViz.DrawDefects(normalized, condition.Defects, imageType.ToString().ToLowerInvariant());
 
-        // ── Phase 13: Advanced defect analysis ──
+        // -- Phase 13: Advanced defect analysis --
         var advancedDefects = advancedDefectAnalyzer.Analyze(normalized, regions);
 
         // Merge advanced defects with standard CV defects
         var allCvDefects = new List<DetectedDefect>(condition.Defects);
         allCvDefects.AddRange(advancedDefects.AdvancedDefects);
 
-        // ── Phase 14: Feature extraction ──
+        // -- Phase 14: Feature extraction --
         var features = featureExtractor.Extract(normalized, regions, centeringResult.Centering);
 
-        // ── Step 5: Run ML inference (defect detection + surface grading) ──
+        // -- Step 5: Run ML inference (defect detection + surface grading) --
         var mlResult = await onnxInference.RunAsync(normalized, ct);
 
-        // ── Phase 15: Hybrid ML/CV combination ──
+        // -- Phase 15: Hybrid ML/CV combination --
         var hybridResult = await hybridCombiner.CombineAsync(
             condition.CornersScore, condition.EdgesScore, condition.SurfaceScore,
             allCvDefects, features, mlResult, ct);
 
-        // ── Step 6: Compute pipeline confidence ──
+        // -- Step 6: Compute pipeline confidence --
         var confidenceInput = new ConfidenceScorer.ConfidenceInput(
             NormalizedImage: normalized,
             CardDetected: true,
@@ -159,7 +165,7 @@ public sealed class OpenCvImageAnalysisService(
 
         var confidence = confidenceScorer.Score(confidenceInput);
 
-        // ── Phase 20: Confidence calibration ──
+        // -- Phase 20: Confidence calibration --
         var calibratedConfidence = confidenceCalibrator.Calibrate(confidence.Overall);
 
         // Adjust quality-reduced confidence
@@ -177,23 +183,10 @@ public sealed class OpenCvImageAnalysisService(
 
         var calibratedOverall = Math.Clamp(calibratedConfidence, 0.01, 0.99);
 
-        // ── Step 7: Build overlay data ──
-        var overlay = BuildOverlay(cardQuad, src.Width, src.Height, centeringResult.DetectedBorders);
+        // -- Step 7: Build overlay data --
+        var overlay = BuildOverlay(cardQuad, src.Width, src.Height);
 
-        // ── Step 7b: Encode the rectified card as JPEG for client display.
-        //   The analyzer sees the card-tight rectified Mat above (`normalized`).
-        //   The CLIENT sees an EXPANDED warp where the detected quad maps to an
-        //   inset rectangle inside the output, so the surrounding margin is
-        //   filled with real source-image pixels from outside the detected
-        //   boundary. This recovers the actual card edge whenever detection
-        //   undershoots to the inner artwork frame, and gives the user a clear
-        //   visual reference for "where the card ends" in every case. The
-        //   analyzer is unaffected — it still operates on the tight Mat.
-        using var paddedForDisplay = normalizer.NormalizeWithExpansion(
-            src, cardQuad, _opts.NormalizedPaddingFraction);
-        var normalizedJpeg = EncodeJpeg(paddedForDisplay, _opts.NormalizedImageJpegQuality);
-
-        // ── Step 8: Composite debug image ──
+        // -- Step 8: Composite debug image --
         debugViz.DrawComposite(src, cardQuad, normalized, centeringResult.DetectedBorders,
             allCvDefects, centeringResult.Centering, imageType.ToString().ToLowerInvariant());
 
@@ -241,111 +234,54 @@ public sealed class OpenCvImageAnalysisService(
                 calibratedOverall, submissionId, confidence.Summary);
         }
 
-        return new ImageAnalysisOutcome(result, normalizedJpeg);
+        return new ImageAnalysisOutcome(result);
     }
 
     /// <summary>
-    /// Recalculates scores from user corrections:
-    /// - Adjusted borders -> recompute centering from border line positions.
-    /// - Dismissed defects -> remove from list and improve edges/surface by reducing penalty.
+    /// Recalculates scores from user corrections: packages correction
+    /// OuterGuides/InnerGuides + centering percentages directly into the result.
     /// </summary>
     public ImageAnalysisResult RecalculateFromCorrection(ImageAnalysisResult original, UserCorrection correction)
     {
-        var centering = original.DetectedCentering;
-        var cornersScore = original.CornersScore;
-        var edgesScore = original.EdgesScore;
-        var surfaceScore = original.SurfaceScore;
-        var defects = original.DetectedDefects;
-        var overlay = original.Overlay;
-
         logger.LogInformation(
-            "RecalculateFromCorrection: AdjustedBorders={HasBorders}, AdjustedBoundary={HasBoundary}, DismissedCount={DismissedCount}",
-            correction.AdjustedBorders is not null,
-            correction.AdjustedBoundary is { Count: > 0 },
-            correction.DismissedDefectIndices.Count);
+            "RecalculateFromCorrection: OuterGuides={OuterCount}, InnerGuides={InnerCount}, LR={LR:F1}%, TB={TB:F1}%",
+            correction.OuterGuides.Count,
+            correction.InnerGuides.Count,
+            correction.LeftRightCenteringPercent,
+            correction.TopBottomCenteringPercent);
 
-        // Update card boundary if user adjusted corners
-        if (correction.AdjustedBoundary is { Count: 4 } && overlay is not null)
+        var overlay = new AnalysisOverlay
         {
-            overlay = overlay with { CardBoundary = correction.AdjustedBoundary };
-        }
+            OuterGuides = correction.OuterGuides,
+            InnerGuides = correction.InnerGuides,
+            LeftRightCenteringPercent = correction.LeftRightCenteringPercent,
+            TopBottomCenteringPercent = correction.TopBottomCenteringPercent
+        };
 
-        // Recalculate centering from adjusted border positions
-        if (correction.AdjustedBorders is not null)
-        {
-            var borders = correction.AdjustedBorders;
-            var leftWidth = borders.LeftBorderX;
-            var rightWidth = 1.0 - borders.RightBorderX;
-            var topHeight = borders.TopBorderY;
-            var bottomHeight = 1.0 - borders.BottomBorderY;
-
-            var totalHorizontal = leftWidth + rightWidth;
-            var totalVertical = topHeight + bottomHeight;
-
-            var lr = totalHorizontal > 0 ? (leftWidth / totalHorizontal) * 100.0 : 50.0;
-            var tb = totalVertical > 0 ? (topHeight / totalVertical) * 100.0 : 50.0;
-
-            logger.LogInformation(
-                "RecalculateFromCorrection: Borders L={Left:F4} R={Right:F4} T={Top:F4} B={Bottom:F4} -> LR={LR:F1}% TB={TB:F1}%",
-                borders.LeftBorderX, borders.RightBorderX, borders.TopBorderY, borders.BottomBorderY, lr, tb);
-
-            centering = new CenteringMeasurement
+        var centering = original.DetectedCentering is not null
+            ? original.DetectedCentering with
             {
-                LeftRightFront = Math.Round(lr, 1),
-                TopBottomFront = Math.Round(tb, 1),
-                LeftRightBack = centering?.LeftRightBack ?? 50,
-                TopBottomBack = centering?.TopBottomBack ?? 50
+                LeftRightFront = Math.Round(correction.LeftRightCenteringPercent, 1),
+                TopBottomFront = Math.Round(correction.TopBottomCenteringPercent, 1)
+            }
+            : new CenteringMeasurement
+            {
+                LeftRightFront = Math.Round(correction.LeftRightCenteringPercent, 1),
+                TopBottomFront = Math.Round(correction.TopBottomCenteringPercent, 1),
+                LeftRightBack = 50,
+                TopBottomBack = 50
             };
-
-            overlay = overlay is not null
-                ? overlay with { BorderLines = correction.AdjustedBorders }
-                : null;
-        }
-
-        // Remove dismissed defects and improve scores
-        if (correction.DismissedDefectIndices.Count > 0 && defects.Count > 0)
-        {
-            var originalDefectCount = defects.Count;
-            var dismissed = correction.DismissedDefectIndices.ToHashSet();
-            var keptDefects = defects
-                .Where((_, idx) => !dismissed.Contains(idx))
-                .ToList();
-
-            var removedCount = originalDefectCount - keptDefects.Count;
-            defects = keptDefects;
-
-            var proportionDismissed = (double)removedCount / originalDefectCount;
-
-            logger.LogInformation(
-                "DismissedDefects: {Removed}/{Total} ({Proportion:P0}) edges={Edges:F1} surface={Surface:F1}",
-                removedCount, originalDefectCount, proportionDismissed,
-                edgesScore ?? 0, surfaceScore ?? 0);
-
-            if (edgesScore.HasValue)
-            {
-                var gap = 10.0 - edgesScore.Value;
-                edgesScore = Math.Clamp(edgesScore.Value + gap * proportionDismissed * 0.9, 1.0, 10.0);
-                edgesScore = Math.Round(edgesScore.Value * 2) / 2.0;
-            }
-
-            if (surfaceScore.HasValue)
-            {
-                var gap = 10.0 - surfaceScore.Value;
-                surfaceScore = Math.Clamp(surfaceScore.Value + gap * proportionDismissed * 0.9, 1.0, 10.0);
-                surfaceScore = Math.Round(surfaceScore.Value * 2) / 2.0;
-            }
-        }
 
         return CloneIndependent(new ImageAnalysisResult
         {
             DetectedCentering = centering,
-            CornersScore = cornersScore,
-            EdgesScore = edgesScore,
-            SurfaceScore = surfaceScore,
-            DetectedDefects = defects,
+            CornersScore = original.CornersScore,
+            EdgesScore = original.EdgesScore,
+            SurfaceScore = original.SurfaceScore,
+            DetectedDefects = original.DetectedDefects,
             Overlay = overlay,
             AnalyzedAt = DateTimeOffset.UtcNow,
-            AnalysisMethod = "OpenCV-v4-corrected",
+            AnalysisMethod = $"{original.AnalysisMethod}-corrected",
             // Preserve ML data from original analysis
             MlDetectedDefects = original.MlDetectedDefects,
             MlSurfaceScore = original.MlSurfaceScore,
@@ -366,20 +302,6 @@ public sealed class OpenCvImageAnalysisService(
     /// <summary>
     /// Deep-clones every nested owned entity in an <see cref="ImageAnalysisResult"/>
     /// so the returned graph shares NO record-typed instances with the input.
-    ///
-    /// This matters because <see cref="ImageAnalysisRecord"/> rows persist their
-    /// <see cref="ImageAnalysisResult"/> as a JSON column whose nested types are
-    /// EF-owned entities tracked via shadow foreign-keys back to the parent
-    /// record's PK. When a user-correction recalc passes nested objects through
-    /// by reference (e.g. Features = original.Features), the SAME C# instance
-    /// would belong to BOTH the existing Initial-source record (already tracked
-    /// from the loaded submission graph) AND the new UserCorrection-source
-    /// record being inserted. EF's change-tracker can't assign two different
-    /// shadow FKs to one instance and aborts SaveChanges with:
-    ///   "The property 'CardFeatures.ImageAnalysisResultImageAnalysisRecordId'
-    ///    is part of a key and so cannot be modified or marked as modified."
-    /// Cloning makes the contract explicit: every recalc output is structurally
-    /// equivalent to but referentially independent from its input.
     /// </summary>
     private static ImageAnalysisResult CloneIndependent(ImageAnalysisResult source) => new()
     {
@@ -390,8 +312,10 @@ public sealed class OpenCvImageAnalysisService(
         DetectedDefects = source.DetectedDefects.Select(d => d with { }).ToList(),
         Overlay = source.Overlay is null ? null : new AnalysisOverlay
         {
-            CardBoundary = source.Overlay.CardBoundary.Select(p => p with { }).ToList(),
-            BorderLines = source.Overlay.BorderLines with { }
+            OuterGuides = source.Overlay.OuterGuides.Select(p => p with { }).ToList(),
+            InnerGuides = source.Overlay.InnerGuides.Select(p => p with { }).ToList(),
+            LeftRightCenteringPercent = source.Overlay.LeftRightCenteringPercent,
+            TopBottomCenteringPercent = source.Overlay.TopBottomCenteringPercent
         },
         AnalyzedAt = source.AnalyzedAt,
         AnalysisMethod = source.AnalysisMethod,
@@ -404,8 +328,6 @@ public sealed class OpenCvImageAnalysisService(
         ConfidenceDetail = source.ConfidenceDetail is null ? null : source.ConfidenceDetail with
         {
             // List<string> is reference-shared after `with`; rebuild for safety.
-            // (EF won't flag this since strings aren't owned entities, but
-            // keeping the clone semantically deep avoids surprise.)
         },
         QualityAssessment = source.QualityAssessment is null ? null : source.QualityAssessment with
         {
@@ -423,10 +345,6 @@ public sealed class OpenCvImageAnalysisService(
         },
         Features = source.Features is null ? null : source.Features with
         {
-            // double[] arrays inside CardFeatures are JSON-serialised inline
-            // and not tracked as owned entities, but cloning them avoids
-            // accidental cross-record mutation if a future stage decides to
-            // tweak them in place.
             EdgeRoughness = [..source.Features.EdgeRoughness],
             CornerGeometry = [..source.Features.CornerGeometry],
             SurfaceVariance = [..source.Features.SurfaceVariance],
@@ -441,65 +359,112 @@ public sealed class OpenCvImageAnalysisService(
         HybridMlConfidence = source.HybridMlConfidence
     };
 
-    // ── Private helpers ──
+    // -- Private helpers --
 
-    private static AnalysisOverlay BuildOverlay(
-        Point2f[] cardQuad, int srcWidth, int srcHeight, BorderLines? detectedBorders)
+    private static AnalysisOverlay BuildOverlay(Point2f[] cardQuad, int imgWidth, int imgHeight)
     {
-        var boundary = cardQuad.Select(p => new NormalizedPoint
-        {
-            X = Math.Round(p.X / srcWidth, 4),
-            Y = Math.Round(p.Y / srcHeight, 4)
-        }).ToList();
+        const double Outer = 0.08;
+        const double Inner = 0.13;
 
-        var borderLines = detectedBorders ?? CreateDefaultBorders();
+        var outer = new List<NormalizedPoint>
+        {
+            new() { X = Outer,     Y = Outer     }, new() { X = 1 - Outer, Y = Outer     },
+            new() { X = 1 - Outer, Y = Outer     }, new() { X = 1 - Outer, Y = 1 - Outer },
+            new() { X = 1 - Outer, Y = 1 - Outer }, new() { X = Outer,     Y = 1 - Outer },
+            new() { X = Outer,     Y = 1 - Outer }, new() { X = Outer,     Y = Outer     }
+        };
+
+        var inner = new List<NormalizedPoint>
+        {
+            new() { X = Inner,     Y = Inner     }, new() { X = 1 - Inner, Y = Inner     },
+            new() { X = 1 - Inner, Y = Inner     }, new() { X = 1 - Inner, Y = 1 - Inner },
+            new() { X = 1 - Inner, Y = 1 - Inner }, new() { X = Inner,     Y = 1 - Inner },
+            new() { X = Inner,     Y = 1 - Inner }, new() { X = Inner,     Y = Inner     }
+        };
+
+        var (lr, tb) = ComputeCenteringPercents(outer, inner);
 
         return new AnalysisOverlay
         {
-            CardBoundary = boundary,
-            BorderLines = borderLines
+            OuterGuides = outer,
+            InnerGuides = inner,
+            LeftRightCenteringPercent = lr,
+            TopBottomCenteringPercent = tb
         };
     }
 
-    private static BorderLines CreateDefaultBorders() => new()
+    private static AnalysisOverlay CreateDefaultOverlay()
     {
-        LeftBorderX = 0.05,
-        RightBorderX = 0.95,
-        TopBorderY = 0.05,
-        BottomBorderY = 0.95
-    };
+        const double Outer = 0.08;
+        const double Inner = 0.13;
+
+        var outer = new List<NormalizedPoint>
+        {
+            new() { X = Outer,     Y = Outer     }, new() { X = 1 - Outer, Y = Outer     },
+            new() { X = 1 - Outer, Y = Outer     }, new() { X = 1 - Outer, Y = 1 - Outer },
+            new() { X = 1 - Outer, Y = 1 - Outer }, new() { X = Outer,     Y = 1 - Outer },
+            new() { X = Outer,     Y = 1 - Outer }, new() { X = Outer,     Y = Outer     }
+        };
+
+        var inner = new List<NormalizedPoint>
+        {
+            new() { X = Inner,     Y = Inner     }, new() { X = 1 - Inner, Y = Inner     },
+            new() { X = 1 - Inner, Y = Inner     }, new() { X = 1 - Inner, Y = 1 - Inner },
+            new() { X = 1 - Inner, Y = 1 - Inner }, new() { X = Inner,     Y = 1 - Inner },
+            new() { X = Inner,     Y = 1 - Inner }, new() { X = Inner,     Y = Inner     }
+        };
+
+        return new AnalysisOverlay
+        {
+            OuterGuides = outer,
+            InnerGuides = inner,
+            LeftRightCenteringPercent = 50.0,
+            TopBottomCenteringPercent = 50.0
+        };
+    }
+
+    private static (double LR, double TB) ComputeCenteringPercents(
+        List<NormalizedPoint> outer, List<NormalizedPoint> inner)
+    {
+        if (outer.Count < 8 || inner.Count < 8)
+            return (50.0, 50.0);
+
+        var outerMids = MidpointsOf(outer);
+        var innerMids = MidpointsOf(inner);
+
+        var left = innerMids[3].X - outerMids[3].X;
+        var right = outerMids[1].X - innerMids[1].X;
+        var top = innerMids[0].Y - outerMids[0].Y;
+        var bottom = outerMids[2].Y - innerMids[2].Y;
+
+        return (SafePercent(left, right), SafePercent(top, bottom));
+    }
+
+    private static List<NormalizedPoint> MidpointsOf(List<NormalizedPoint> pairs)
+    {
+        var mids = new List<NormalizedPoint>();
+        for (var i = 0; i + 1 < pairs.Count; i += 2)
+            mids.Add(Mid(pairs[i], pairs[i + 1]));
+        return mids;
+    }
+
+    private static NormalizedPoint Mid(NormalizedPoint a, NormalizedPoint b) =>
+        new() { X = (a.X + b.X) / 2.0, Y = (a.Y + b.Y) / 2.0 };
+
+    private static double SafePercent(double a, double b)
+    {
+        var total = a + b;
+        return total > 0 ? Math.Round(a / total * 100.0, 1) : 50.0;
+    }
+
+    private static NormalizedPoint NormalizePoint(Point2f p, int w, int h) =>
+        new() { X = Math.Round(p.X / w, 4), Y = Math.Round(p.Y / h, 4) };
 
     private static async Task<byte[]> ReadStreamAsync(Stream stream, CancellationToken ct)
     {
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
         return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Encodes a Mat as JPEG bytes. Returns null if encoding fails.
-    /// Used to ship the rectified card image back to the client as the primary
-    /// "centering view" — the surface for the digital grading overlay.
-    /// </summary>
-    private static byte[]? EncodeJpeg(Mat image, int quality)
-    {
-        if (image is null || image.Empty())
-            return null;
-
-        try
-        {
-            var qualityClamped = Math.Clamp(quality, 50, 100);
-            var success = Cv2.ImEncode(
-                ".jpg",
-                image,
-                out var buffer,
-                [(int)ImwriteFlags.JpegQuality, qualityClamped]);
-            return success ? buffer : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static ImageAnalysisResult CreateEmptyResult() => new()
@@ -512,10 +477,4 @@ public sealed class OpenCvImageAnalysisService(
         AnalyzedAt = DateTimeOffset.UtcNow,
         AnalysisMethod = "OpenCV-v4"
     };
-
-    private static ImageAnalysisOutcome EmptyOutcome() =>
-        new(CreateEmptyResult(), null);
-
-    private static ImageAnalysisOutcome EmptyOutcome(ImageAnalysisResult result) =>
-        new(result, null);
 }

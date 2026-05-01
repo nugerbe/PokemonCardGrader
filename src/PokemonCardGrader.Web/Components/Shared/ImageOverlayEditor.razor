@@ -1,642 +1,271 @@
-@using Microsoft.Extensions.Options
-@using PokemonCardGrader.Application.Configuration
 @using PokemonCardGrader.Domain.ValueObjects
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject ILogger<ImageOverlayEditor> Logger
-@inject IOptions<CardAnalysisOptions> AnalysisOptions
 
-<div class="overlay-editor" style="position:relative;display:inline-block;max-width:100%">
-    <div style="position:relative">
-        <img @ref="_imgRef" src="@EffectiveImageSrc" alt="Card analysis overlay"
-             style="width:100%;display:block;border-radius:8px" />
+@*
+    Line-guide centering editor.
 
-        <canvas @ref="_canvasRef"
-                style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:8px" />
+    Shows the original photo and lets the user place 8 OUTER (cyan) and 8
+    INNER (amber) endpoints to define the four card edges and four artwork
+    edges. Centering percentages are computed live in JS as the user drags;
+    on Confirm we snapshot the guide state and ship it to the parent via
+    OnCorrectionSubmitted as a single UserCorrection payload.
+
+    There is no auto-save during drag. The reviews of competing apps that
+    we surveyed all complained about chatty roundtrips and reset-on-touch
+    bugs that come from updating server state on every pointermove. The
+    explicit Confirm button keeps the contract clean: server only sees the
+    final state.
+*@
+
+<div class="overlay-editor" style="display:flex;flex-direction:column;gap:8px">
+    <div class="canvas-wrap"
+         style="position:relative;width:100%;aspect-ratio:5/7;background:#0f172a;border:1px solid var(--ink-5);border-radius:8px;overflow:hidden">
+        @* The hidden <img> is the canvas's source bitmap. Hidden via display:none
+           rather than visibility:hidden so it contributes no layout box. *@
+        <img id="@ImageElementId" src="@(LocalImageDataUrl ?? ImageUrl)"
+             alt="" style="display:none" crossorigin="anonymous" />
+        <canvas id="@CanvasElementId"
+                style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair"></canvas>
     </div>
 
-    @* Boundary status indicator *@
-    @if (ImmediateMode || RectifiedAvailable)
-    {
-        <div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            @if (InRectifiedMode)
+    <div class="readout"
+         style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-family:ui-monospace,monospace;font-size:13px">
+        <span style="color:var(--ink-3)">L/R</span>
+        <span style="font-weight:600;color:@LeftRightColor">@_lrPercent.ToString("F1")/@((100 - _lrPercent).ToString("F1"))</span>
+        <span style="color:var(--ink-4)">·</span>
+        <span style="color:var(--ink-3)">T/B</span>
+        <span style="font-weight:600;color:@TopBottomColor">@_tbPercent.ToString("F1")/@((100 - _tbPercent).ToString("F1"))</span>
+        <span style="color:var(--ink-4)">·</span>
+        <span style="color:@WorstColor;font-weight:600">@WorstSummary</span>
+
+        <span style="margin-left:auto;display:flex;gap:8px">
+            @if (!ImmediateMode)
             {
-                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
-                <span style="font-size:11px;color:var(--accent,#6366f1)">Rectified view</span>
-                <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag the green guides to adjust the inner borders)</span>
+                <button type="button" class="btn-secondary" @onclick="ResetGuides" disabled="@_busy">
+                    Reset
+                </button>
+                <button type="button" class="btn-primary" @onclick="ConfirmAsync" disabled="@_busy">
+                    @(_busy ? "Saving…" : "Confirm")
+                </button>
             }
-            else
-            {
-                @switch (_boundaryStatus)
+        </span>
+    </div>
+
+    <div style="font-size:11px;color:var(--ink-4);line-height:1.45">
+        Drag the <span style="color:#22d3ee;font-weight:600">cyan</span> handles to mark the OUTER card edge,
+        and the <span style="color:#f59e0b;font-weight:600">amber</span> handles to mark the INNER artwork
+        border. Each edge has two endpoints — slight tilt is fine, the math handles it.
+    </div>
+
+    @if (_aspectRatioStatus is "unusual" or "wrong")
+    {
+        @* Advisory only — never blocks Confirm. *@
+        <div style="font-size:11px;color:#f59e0b;display:flex;gap:6px;align-items:center;line-height:1.4">
+            <span style="font-weight:600">⚠</span>
+            <span>
+                @if (_aspectRatioStatus == "wrong")
                 {
-                    case BoundaryDetectionStatus.AutoDetected:
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sage,#22c55e)"></span>
-                        <span style="font-size:11px;color:var(--sage,#22c55e)">Auto-detected</span>
-                        break;
-                    case BoundaryDetectionStatus.BackendRefined:
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
-                        <span style="font-size:11px;color:var(--accent,#6366f1)">Backend-refined</span>
-                        break;
-                    default:
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber,#f59e0b)"></span>
-                        <span style="font-size:11px;color:var(--amber,#f59e0b)">Manual adjustment needed</span>
-                        break;
+                    <span>The outer guide doesn't look card-shaped — double-check you've placed the cyan handles on the actual card edges.</span>
                 }
-                <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag corners to adjust card boundary)</span>
-            }
-
-            @if (RectifiedAvailable)
-            {
-                <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px;margin-left:auto"
-                        @onclick="ToggleViewMode">
-                    @(_showOriginalPhoto ? "Show rectified card" : "View original photo")
-                </button>
-            }
-        </div>
-    }
-
-    @* Centering readouts + rotation controls — always visible in immediate mode *@
-    @if (_showControls)
-    {
-        <div class="centering-inline-panel">
-            <span class="centering-inline-readout">
-                <span style="opacity:0.6">L/R</span> @_lrPercent
-            </span>
-            <span class="centering-inline-readout">
-                <span style="opacity:0.6">T/B</span> @_tbPercent
-            </span>
-
-            @* Percentage guide toggle *@
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-3);cursor:pointer;margin-left:8px">
-                <input type="checkbox" @bind="_percentGuidesVisible" @bind:after="HandlePercentGuidesToggle"
-                       style="width:14px;height:14px" />
-                Guides
-            </label>
-
-            @* Rotation only makes sense on the original photo — the rectified view
-               has already been perspective-corrected server-side. *@
-            @if (!InRectifiedMode)
-            {
-                <span style="font-size:12px;color:var(--ink-3);flex-shrink:0;margin-left:auto">Rotation</span>
-                <input type="range" class="slider" min="-10" max="10" step="0.1"
-                       value="@_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)"
-                       @oninput="HandleRotationInput"
-                       style="flex:1;min-width:80px;max-width:160px" />
-                <span class="mono" style="font-size:12px;min-width:48px;text-align:right">
-                    @(_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))&deg;
-                </span>
-                <button class="btn btn-ghost" style="padding:4px 8px;font-size:11px" @onclick="HandleResetRotation">
-                    0&deg;
-                </button>
-            }
-        </div>
-    }
-
-    @* Defect dismiss controls below image *@
-    @if (DetectedDefects is { Count: > 0 })
-    {
-        <div style="margin-top:10px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3)">
-                    DETECTED DEFECTS
-                    <span style="font-weight:400;opacity:0.7;margin-left:6px">(click to dismiss false positives)</span>
-                </div>
-                <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:auto"
-                        @onclick="ToggleAllDefects">
-                    @(_dismissedDefects.Count == DetectedDefects!.Count ? "Restore all" : "Dismiss all")
-                </button>
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">
-                @for (var i = 0; i < DetectedDefects.Count; i++)
+                else
                 {
-                    var idx = i;
-                    var d = DetectedDefects[i];
-                    var dismissed = _dismissedDefects.Contains(idx);
-                    var confidenceLevel = d.Confidence >= 0.7 ? "high" : d.Confidence >= 0.4 ? "medium" : "low";
-                    var confidenceColor = d.Confidence >= 0.7 ? "var(--rose, #f43f5e)" : d.Confidence >= 0.4 ? "var(--amber, #f59e0b)" : "var(--ink-3, #94a3b8)";
-                    <button class="chip @(dismissed ? "dismissed" : "danger")"
-                            style="font-size:11px;cursor:pointer;@(dismissed ? "opacity:0.4;text-decoration:line-through" : "")"
-                            title="@($"Confidence: {d.Confidence:P0} ({confidenceLevel})")"
-                            @onclick="() => ToggleDefect(idx)">
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:@(dismissed ? "var(--ink-3)" : confidenceColor);flex-shrink:0"></span>
-                        @d.Type
-                        <span class="mono" style="font-size:10px;opacity:0.7">@confidenceLevel</span>
-                        @if (!dismissed)
-                        {
-                            <span style="margin-left:4px;font-weight:bold">&times;</span>
-                        }
-                    </button>
+                    <span>The outer guide aspect ratio is unusual for a Pokémon card. Worth a quick visual check before confirming.</span>
                 }
-            </div>
-        </div>
-    }
-
-    @if (_hasChanges)
-    {
-        <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-            @if (_isRecalculating)
-            {
-                <span style="font-size:12px;color:var(--ink-3)">Recalculating…</span>
-            }
-            else
-            {
-                <span style="font-size:11px;color:var(--sage)">&#10003; Scores updated</span>
-            }
-            <button class="btn btn-ghost" style="font-size:12px;margin-left:auto" @onclick="Reset">
-                Reset
-            </button>
+            </span>
         </div>
     }
 </div>
 
 @code {
-    [Parameter] public string ImageUrl { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string ImageUrl { get; set; } = string.Empty;
     [Parameter] public string? LocalImageDataUrl { get; set; }
-    [Parameter] public string? NormalizedImageUrl { get; set; }
-    [Parameter] public bool ImmediateMode { get; set; }
     [Parameter] public AnalysisOverlay? Overlay { get; set; }
-    [Parameter] public List<DetectedDefect>? DetectedDefects { get; set; }
     [Parameter] public Guid CardImageId { get; set; }
+    [Parameter] public bool ImmediateMode { get; set; }
     [Parameter] public EventCallback<UserCorrection> OnCorrectionSubmitted { get; set; }
 
-    private ElementReference _imgRef;
-    private ElementReference _canvasRef;
-    private IJSObjectReference? _jsInstance;
-    private DotNetObjectReference<ImageOverlayEditor>? _dotNetRef;
+    // Stable per-instance ids.
+    private readonly string _instanceId = Guid.NewGuid().ToString("N")[..8];
+    private string CanvasElementId => $"co-canvas-{_instanceId}";
+    private string ImageElementId => $"co-image-{_instanceId}";
 
-    private BorderLines? _adjustedBorders;
-    private List<NormalizedPoint>? _adjustedBoundary;
-    private readonly HashSet<int> _dismissedDefects = [];
-    private bool _hasChanges;
-    private bool _isRecalculating;
-    private Guid _previousCardImageId;
-    private bool _dataNeedsSync;
-    private CancellationTokenSource? _autoSubmitCts;
-    private bool _clientDetectionDone;
-
-    private double _rotation;
-    private string _lrPercent = "50/50";
-    private string _tbPercent = "50/50";
-    private bool _percentGuidesVisible;
-    private BoundaryDetectionStatus _boundaryStatus = BoundaryDetectionStatus.Default;
-    private AnalysisOverlay? _previousOverlay;
-
-    // ── Rectified-view state ──
-    // When the server has produced a perspective-corrected card image
-    // (NormalizedImageUrl is set), default the editor to that view. The user
-    // can flip back to the original photo to verify detection or adjust corners.
-    private bool _showOriginalPhoto;
-    private string? _previousNormalizedUrl;
-
-    private bool RectifiedAvailable => !string.IsNullOrEmpty(NormalizedImageUrl);
-    private bool InRectifiedMode => RectifiedAvailable && !_showOriginalPhoto;
-
-    private string EffectiveImageSrc =>
-        InRectifiedMode ? NormalizedImageUrl! : (LocalImageDataUrl ?? ImageUrl);
-
-    private bool _showControls =>
-        ImmediateMode ||
-        InRectifiedMode ||
-        (Overlay?.CardBoundary is { Count: 4 } && Overlay.BorderLines is not null);
+    private DotNetObjectReference<ImageOverlayEditor>? _selfRef;
+    private bool _initialised;
+    private bool _busy;
 
     /// <summary>
-    /// Inset of the card within the rectified image, as a 0-1 fraction. The
-    /// server builds the rectified image via <c>NormalizeWithExpansion</c>
-    /// which maps the detected quad to a centered inset rectangle — meaning
-    /// the card sits at <c>[NormalizedPaddingFraction, 1 - NormalizedPaddingFraction]</c>
-    /// in display coordinates. The JS overlay's bilinear-quad math uses this
-    /// to draw the inner-border guides at the correct locations and to dim
-    /// the surrounding margin.
+    /// Reference of the last overlay we pushed to JS. Used to skip the JS
+    /// round-trip when the parent re-renders but Overlay didn't change.
     /// </summary>
-    private double GetRectifiedInset() =>
-        Math.Clamp(AnalysisOptions.Value.NormalizedPaddingFraction, 0.0, 0.45);
+    private AnalysisOverlay? _lastPushedOverlay;
 
-    private object BuildJsData()
+    // Live readout
+    private double _lrPercent = 50.0;
+    private double _tbPercent = 50.0;
+    private string _aspectRatioStatus = "ok";
+
+    private string LeftRightColor => GradeTierColor(_lrPercent);
+    private string TopBottomColor => GradeTierColor(_tbPercent);
+    private string WorstColor => GradeTierColor(Math.Max(_lrPercent, _tbPercent));
+
+    /// <summary>Worst-axis summary, rendered as the high-level grade tier.</summary>
+    private string WorstSummary
     {
-        var boundary = Overlay?.CardBoundary?
-            .Select(p => new double[] { p.X, p.Y }).ToArray();
-
-        var borders = _adjustedBorders ?? Overlay?.BorderLines ?? new BorderLines
+        get
         {
-            LeftBorderX = 0.05,
-            RightBorderX = 0.95,
-            TopBorderY = 0.05,
-            BottomBorderY = 0.95
-        };
-
-        var defects = DetectedDefects?.Select(d => new
-        {
-            type = d.Type,
-            severity = d.Severity,
-            confidence = d.Confidence,
-            x = d.X,
-            y = d.Y,
-            w = d.Width,
-            h = d.Height
-        }).ToArray();
-
-        return new
-        {
-            boundary,
-            borders = new
+            var worst = Math.Max(_lrPercent, _tbPercent);
+            return worst switch
             {
-                left = borders.LeftBorderX,
-                right = borders.RightBorderX,
-                top = borders.TopBorderY,
-                bottom = borders.BottomBorderY
-            },
-            defects,
-            rotation = _rotation,
-            rectified = InRectifiedMode
-        };
+                <= 55.0 => "PSA 10 centering range",
+                <= 60.0 => "PSA 9 centering range",
+                <= 65.0 => "PSA 8 centering range",
+                _       => "Below PSA 8 centering"
+            };
+        }
     }
 
-    // --- Lifecycle ---
-
-    protected override void OnParametersSet()
+    private static string GradeTierColor(double worstPct) => worstPct switch
     {
-        if (CardImageId != _previousCardImageId)
-        {
-            _adjustedBorders = null;
-            _adjustedBoundary = null;
-            _dismissedDefects.Clear();
-            _hasChanges = false;
-            _rotation = 0;
-            _lrPercent = "50/50";
-            _tbPercent = "50/50";
-            _previousCardImageId = CardImageId;
-            _clientDetectionDone = false;
-            _boundaryStatus = BoundaryDetectionStatus.Default;
-            _showOriginalPhoto = false;
-            _previousNormalizedUrl = null;
-            _dataNeedsSync = true;
-        }
-
-        // The rectified image arrives asynchronously after the worker finishes.
-        // When its URL changes (null -> set, or swapped between front/back), we
-        // need to re-sync the JS overlay so it picks up the new src + flag.
-        if (NormalizedImageUrl != _previousNormalizedUrl)
-        {
-            _previousNormalizedUrl = NormalizedImageUrl;
-            _dataNeedsSync = true;
-        }
-
-        // When backend overlay arrives, update the boundary
-        if (Overlay is not null && Overlay != _previousOverlay &&
-            Overlay.CardBoundary is { Count: 4 })
-        {
-            _previousOverlay = Overlay;
-            _boundaryStatus = BoundaryDetectionStatus.BackendRefined;
-            _dataNeedsSync = true;
-        }
-    }
+        <= 55.0 => "#10b981", // green
+        <= 60.0 => "#eab308", // yellow
+        <= 65.0 => "#f97316", // orange
+        _       => "#ef4444"  // red
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            _previousCardImageId = CardImageId;
-            _previousNormalizedUrl = NormalizedImageUrl;
-            _dotNetRef = DotNetObjectReference.Create(this);
-            _jsInstance = await JS.InvokeAsync<IJSObjectReference>(
-                "cardOverlay.init", _dotNetRef, _canvasRef, _imgRef, BuildJsData());
-            _dataNeedsSync = false;
+            _selfRef = DotNetObjectReference.Create(this);
+            _initialised = await JS.InvokeAsync<bool>(
+                "cardOverlay.init", CanvasElementId, ImageElementId, _selfRef);
 
-            // In immediate mode (local data url, pre-analysis), run client-side
-            // detection — but skip it if the rectified image is already showing,
-            // since detecting a card inside an already-rectified card is a no-op.
-            if (ImmediateMode && !_clientDetectionDone && !InRectifiedMode)
+            if (_initialised && Overlay is not null)
             {
-                await RunClientSideDetection();
+                await PushOverlayToJsAsync();
+                _lastPushedOverlay = Overlay;
             }
         }
-        else if (_dataNeedsSync && _jsInstance is not null)
+        else if (_initialised && !ReferenceEquals(_lastPushedOverlay, Overlay))
         {
-            _dataNeedsSync = false;
-
-            // Toggle rectified mode FIRST so the boundary lock is in place before
-            // updateData/setBoundary fire. The JS side is idempotent — calling
-            // setRectifiedMode with the same value is a no-op.
-            await _jsInstance.InvokeVoidAsync("setRectifiedMode", InRectifiedMode);
-
-            // If backend data arrived (and we're not in rectified mode), use
-            // setBoundary for a refined update of the photo-view quad.
-            if (!InRectifiedMode &&
-                _boundaryStatus == BoundaryDetectionStatus.BackendRefined &&
-                Overlay?.CardBoundary is { Count: 4 })
-            {
-                var corners = Overlay.CardBoundary
-                    .Select(p => new double[] { p.X, p.Y }).ToArray();
-                await _jsInstance.InvokeVoidAsync("setBoundary", (object)corners);
-
-                // Also update full data (borders, defects)
-                await _jsInstance.InvokeVoidAsync("updateData", BuildJsData());
-            }
-            else
-            {
-                await _jsInstance.InvokeVoidAsync("updateData", BuildJsData());
-            }
+            await PushOverlayToJsAsync();
+            _lastPushedOverlay = Overlay;
         }
     }
 
-    private async Task RunClientSideDetection()
+    private async Task PushOverlayToJsAsync()
     {
-        _clientDetectionDone = true;
+        if (Overlay is null
+            || Overlay.OuterGuides.Count != 8
+            || Overlay.InnerGuides.Count != 8) return;
 
-        try
-        {
-            var corners = await JS.InvokeAsync<double[][]?>(
-                "cardBorderDetect.detect", _imgRef);
+        var outer = Overlay.OuterGuides.Select(p => new { x = p.X, y = p.Y }).ToArray();
+        var inner = Overlay.InnerGuides.Select(p => new { x = p.X, y = p.Y }).ToArray();
+        await JS.InvokeVoidAsync("cardOverlay.setOverlay", CanvasElementId, outer, inner);
 
-            if (corners is { Length: 4 } && _jsInstance is not null)
-            {
-                await _jsInstance.InvokeVoidAsync("setBoundary", (object)corners);
-                _boundaryStatus = BoundaryDetectionStatus.AutoDetected;
-            }
-            else
-            {
-                _boundaryStatus = BoundaryDetectionStatus.Default;
-            }
-
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Client-side card detection failed");
-            _boundaryStatus = BoundaryDetectionStatus.Default;
-        }
-    }
-
-    // --- JS callbacks ---
-
-    [JSInvokable]
-    public async Task OnBorderDragEnd(double left, double right, double top, double bottom)
-    {
-        _adjustedBorders = new BorderLines
-        {
-            LeftBorderX = Math.Clamp(left, 0, 1),
-            RightBorderX = Math.Clamp(right, 0, 1),
-            TopBorderY = Math.Clamp(top, 0, 1),
-            BottomBorderY = Math.Clamp(bottom, 0, 1)
-        };
-
-        Logger.LogInformation("OnBorderDragEnd: L={L:F4} R={R:F4} T={T:F4} B={B:F4} (image={ImageId})",
-            left, right, top, bottom, CardImageId);
-
-        _hasChanges = true;
+        _lrPercent = Overlay.LeftRightCenteringPercent;
+        _tbPercent = Overlay.TopBottomCenteringPercent;
         StateHasChanged();
-        await AutoSubmitCorrection();
     }
 
+    /// <summary>Called from JS on every drag update with the live centering values.</summary>
     [JSInvokable]
-    public async Task OnBoundaryDragEnd(double[][] corners)
+    public Task OnOverlayChanged(double lrPercent, double tbPercent, string aspectRatioStatus)
     {
-        _adjustedBoundary = corners.Select(p => new NormalizedPoint
-        {
-            X = Math.Clamp(p[0], 0, 1),
-            Y = Math.Clamp(p[1], 0, 1)
-        }).ToList();
-
-        _boundaryStatus = BoundaryDetectionStatus.AutoDetected;
-
-        Logger.LogInformation("OnBoundaryDragEnd: {Count} corners (image={ImageId})",
-            corners.Length, CardImageId);
-
-        _hasChanges = true;
+        _lrPercent = lrPercent;
+        _tbPercent = tbPercent;
+        _aspectRatioStatus = aspectRatioStatus ?? "ok";
         StateHasChanged();
-        await AutoSubmitCorrection();
+        return Task.CompletedTask;
     }
 
-    [JSInvokable]
-    public void OnCenteringUpdated(string lr, string tb)
+    private async Task ResetGuides()
     {
-        _lrPercent = lr;
-        _tbPercent = tb;
-        InvokeAsync(StateHasChanged);
-    }
-
-    [JSInvokable]
-    public void OnRotationDetected(double degrees)
-    {
-        _rotation = degrees;
-        InvokeAsync(StateHasChanged);
-    }
-
-    [JSInvokable]
-    public void OnDragCancelled()
-    {
-        // Pointer left the window — no state change needed
-    }
-
-    // --- Rotation ---
-
-    private async Task HandleRotationInput(ChangeEventArgs e)
-    {
-        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var deg))
+        if (Overlay is not null)
         {
-            _rotation = deg;
-            if (_jsInstance is not null)
-                await _jsInstance.InvokeVoidAsync("setRotation", deg);
-        }
-    }
-
-    private async Task HandleResetRotation()
-    {
-        _rotation = 0;
-        if (_jsInstance is not null)
-            await _jsInstance.InvokeVoidAsync("setRotation", 0);
-    }
-
-    /// <summary>
-    /// Toggle between the rectified card view (the digital "Luxiv" overlay sitting
-    /// on the perspective-corrected card) and the original photo view (where the
-    /// user can verify the detected card boundary or hand-adjust corners).
-    /// </summary>
-    private void ToggleViewMode()
-    {
-        if (!RectifiedAvailable) return;
-
-        _showOriginalPhoto = !_showOriginalPhoto;
-        // Reset rotation when leaving photo view so it doesn't carry stale state
-        // back into a rectified view later.
-        if (!_showOriginalPhoto)
-        {
-            _rotation = 0;
-        }
-        _dataNeedsSync = true;
-    }
-
-    // --- Percentage guides ---
-
-    private async Task HandlePercentGuidesToggle()
-    {
-        if (_jsInstance is not null)
-        {
-            await _jsInstance.InvokeVoidAsync("setPercentGuides",
-                _percentGuidesVisible,
-                new[] { 0.45, 0.50, 0.55 });
-        }
-    }
-
-    // --- Defects ---
-
-    private async Task ToggleAllDefects()
-    {
-        if (DetectedDefects is not { Count: > 0 }) return;
-
-        var dismissAll = _dismissedDefects.Count < DetectedDefects.Count;
-
-        if (dismissAll)
-        {
-            for (var i = 0; i < DetectedDefects.Count; i++)
-            {
-                if (_dismissedDefects.Add(i) && _jsInstance is not null)
-                    await _jsInstance.InvokeVoidAsync("dismiss", i);
-            }
+            await PushOverlayToJsAsync();
         }
         else
         {
-            var indices = _dismissedDefects.OrderByDescending(i => i).ToList();
-            _dismissedDefects.Clear();
-            foreach (var i in indices)
-            {
-                if (_jsInstance is not null)
-                    await _jsInstance.InvokeVoidAsync("undismiss", i);
-            }
+            await JS.InvokeVoidAsync("cardOverlay.setOverlay", CanvasElementId, null, null);
         }
-
-        _hasChanges = true;
-        await AutoSubmitCorrection();
     }
 
-    private async Task ToggleDefect(int index)
+    private async Task ConfirmAsync()
     {
-        if (!_dismissedDefects.Remove(index))
-        {
-            _dismissedDefects.Add(index);
-            if (_jsInstance is not null)
-                await _jsInstance.InvokeVoidAsync("dismiss", index);
-        }
-        else
-        {
-            if (_jsInstance is not null)
-                await _jsInstance.InvokeVoidAsync("undismiss", index);
-        }
-        _hasChanges = true;
-        await AutoSubmitCorrection();
-    }
-
-    // --- Auto-submit ---
-
-    /// <summary>
-    /// Wait this long after the last user adjustment before sending the correction
-    /// to the server. Each new adjustment cancels and restarts the timer, so a
-    /// burst of drags collapses into a single server roundtrip on settle. Inline
-    /// centering readouts update instantly via the JS overlay's local math —
-    /// only the persisted recalc + re-estimate is debounced.
-    /// </summary>
-    private static readonly TimeSpan AutoSubmitDebounce = TimeSpan.FromMilliseconds(750);
-
-    private async Task AutoSubmitCorrection()
-    {
-        _autoSubmitCts?.Cancel();
-        _autoSubmitCts?.Dispose();
-        _autoSubmitCts = new CancellationTokenSource();
-        var token = _autoSubmitCts.Token;
-
-        _isRecalculating = true;
+        if (_busy || CardImageId == Guid.Empty) return;
+        _busy = true;
         StateHasChanged();
 
         try
         {
-            await Task.Delay(AutoSubmitDebounce, token);
-        }
-        catch (OperationCanceledException)
-        {
-            // A newer adjustment came in while we were waiting — the chained
-            // call will do the actual submit. Leave _isRecalculating true so
-            // the spinner stays visible across the burst.
-            return;
-        }
+            var snap = await JS.InvokeAsync<OverlaySnapshot?>("cardOverlay.snapshot", CanvasElementId);
+            if (snap is null
+                || snap.OuterGuides is null || snap.OuterGuides.Length != 8
+                || snap.InnerGuides is null || snap.InnerGuides.Length != 8)
+            {
+                Logger.LogWarning(
+                    "ConfirmAsync: invalid snapshot for image {ImageId} (counts {Outer}/{Inner})",
+                    CardImageId, snap?.OuterGuides?.Length ?? -1, snap?.InnerGuides?.Length ?? -1);
+                return;
+            }
 
-        // Snapshot at submit time (not debounce-start time) so the latest
-        // adjustment in a burst is what gets sent.
-        var correction = new UserCorrection
-        {
-            CardImageId = CardImageId,
-            AdjustedBoundary = _adjustedBoundary,
-            AdjustedBorders = _adjustedBorders,
-            DismissedDefectIndices = _dismissedDefects.OrderBy(i => i).ToList()
-        };
+            var correction = new UserCorrection
+            {
+                CardImageId = CardImageId,
+                OuterGuides = snap.OuterGuides.Select(p => new NormalizedPoint { X = p.X, Y = p.Y }).ToList(),
+                InnerGuides = snap.InnerGuides.Select(p => new NormalizedPoint { X = p.X, Y = p.Y }).ToList(),
+                LeftRightCenteringPercent = snap.LeftRightPercent,
+                TopBottomCenteringPercent = snap.TopBottomPercent
+            };
 
-        Logger.LogInformation(
-            "AutoSubmitCorrection: image={ImageId} hasBorders={HasBorders} hasBoundary={HasBoundary} dismissed={Dismissed}" +
-            (correction.AdjustedBorders is { } b
-                ? $" borders=[L={b.LeftBorderX:F4} R={b.RightBorderX:F4} T={b.TopBorderY:F4} B={b.BottomBorderY:F4}]"
-                : ""),
-            CardImageId,
-            correction.AdjustedBorders is not null,
-            correction.AdjustedBoundary is not null,
-            correction.DismissedDefectIndices.Count);
+            Logger.LogInformation(
+                "ImageOverlayEditor.Confirm: image={ImageId} L/R={LR:F1}% T/B={TB:F1}%",
+                CardImageId, snap.LeftRightPercent, snap.TopBottomPercent);
 
-        try
-        {
             await OnCorrectionSubmitted.InvokeAsync(correction);
         }
         finally
         {
-            _isRecalculating = false;
+            _busy = false;
             StateHasChanged();
         }
     }
 
-    private async Task Reset()
-    {
-        _adjustedBorders = null;
-        _adjustedBoundary = null;
-        _dismissedDefects.Clear();
-        _hasChanges = false;
-        _rotation = 0;
-        _lrPercent = "50/50";
-        _tbPercent = "50/50";
-
-        if (_jsInstance is not null)
-            await _jsInstance.InvokeVoidAsync("reset", BuildJsData());
-    }
-
     public async ValueTask DisposeAsync()
     {
-        _autoSubmitCts?.Cancel();
-        _autoSubmitCts?.Dispose();
-
-        var js = _jsInstance;
-        _jsInstance = null;
-
-        if (js is not null)
+        try
         {
-            try
+            if (_initialised)
             {
-                await js.InvokeVoidAsync("dispose");
+                await JS.InvokeVoidAsync("cardOverlay.dispose", CanvasElementId);
             }
-            catch (JSDisconnectedException) { }
-            catch (ObjectDisposedException) { }
-
-            try
-            {
-                await js.DisposeAsync();
-            }
-            catch (JSDisconnectedException) { }
-            catch (ObjectDisposedException) { }
         }
+        catch (JSDisconnectedException) { /* circuit gone, nothing to clean up */ }
+        catch (Exception ex) { Logger.LogDebug(ex, "Error during overlay editor dispose"); }
 
-        _dotNetRef?.Dispose();
+        _selfRef?.Dispose();
+        _selfRef = null;
     }
 
-    private enum BoundaryDetectionStatus
+    /// <summary>
+    /// JS-snapshot DTO. Property names match cardOverlay.snapshot()'s
+    /// camelCase JSON keys.
+    /// </summary>
+    private sealed class OverlaySnapshot
     {
-        Default,
-        AutoDetected,
-        BackendRefined
+        public OverlayPoint[]? OuterGuides { get; set; }
+        public OverlayPoint[]? InnerGuides { get; set; }
+        public double LeftRightPercent { get; set; }
+        public double TopBottomPercent { get; set; }
+        public string? AspectRatioStatus { get; set; }
+    }
+
+    private sealed class OverlayPoint
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
     }
 }

@@ -1,13 +1,10 @@
 namespace PokemonCardGrader.Domain.ValueObjects;
 
-/// <summary>
-/// Represents a user's correction to the automated analysis overlay.
-/// Used to recalculate scores based on adjusted detection results.
-/// </summary>
 public sealed record UserCorrection
 {
     public Guid CardImageId { get; init; }
-    public List<NormalizedPoint>? AdjustedBoundary { get; init; }
-    public BorderLines? AdjustedBorders { get; init; }
-    public List<int> DismissedDefectIndices { get; init; } = [];
+    public List<NormalizedPoint> OuterGuides { get; init; } = [];
+    public List<NormalizedPoint> InnerGuides { get; init; } = [];
+    public double LeftRightCenteringPercent { get; init; } = 50.0;
+    public double TopBottomCenteringPercent { get; init; } = 50.0;
 }

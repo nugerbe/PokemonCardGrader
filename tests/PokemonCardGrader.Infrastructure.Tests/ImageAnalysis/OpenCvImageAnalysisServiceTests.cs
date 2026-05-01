@@ -13,7 +13,6 @@ namespace PokemonCardGrader.Infrastructure.Tests.ImageAnalysis;
 public sealed class OpenCvImageAnalysisServiceTests
 {
     private const double CenteringTolerancePct = 5.5;
-    private const double BorderFractionTolerance = 0.015;
 
     private readonly OpenCvImageAnalysisService _sut;
 
@@ -93,26 +92,36 @@ public sealed class OpenCvImageAnalysisServiceTests
     #region Overlay and Border Lines
 
     [Fact]
-    public async Task AnalyzeImageAsync_ReturnsNonNullOverlayWithBorderLines()
+    public async Task AnalyzeImageAsync_ReturnsOverlayWithEightOuterAndInnerEndpoints()
     {
-        // Arrange - use a well-centered card
-        var (stream, expected) = TestCardImageGenerator.CreateCardImage(25, 25, 35, 35);
+        var (stream, _) = TestCardImageGenerator.CreateCardImage(25, 25, 35, 35);
         using var imageStream = stream;
 
-        // Act
         var result = (await _sut.AnalyzeImageAsync(imageStream, ImageType.Front, CancellationToken.None)).Result;
 
-        // Assert
         Assert.NotNull(result.Overlay);
-        Assert.NotNull(result.Overlay.CardBoundary);
-        Assert.Equal(4, result.Overlay.CardBoundary.Count);
+        Assert.Equal(8, result.Overlay.OuterGuides.Count);
+        Assert.Equal(8, result.Overlay.InnerGuides.Count);
+        Assert.InRange(result.Overlay.LeftRightCenteringPercent, 50.0, 100.0);
+        Assert.InRange(result.Overlay.TopBottomCenteringPercent, 50.0, 100.0);
 
-        var borders = result.Overlay.BorderLines;
-        Assert.NotNull(borders);
-        Assert.InRange(borders.LeftBorderX, expected.LeftBorderX - BorderFractionTolerance, expected.LeftBorderX + BorderFractionTolerance);
-        Assert.InRange(borders.RightBorderX, expected.RightBorderX - BorderFractionTolerance, expected.RightBorderX + BorderFractionTolerance);
-        Assert.InRange(borders.TopBorderY, expected.TopBorderY - BorderFractionTolerance, expected.TopBorderY + BorderFractionTolerance);
-        Assert.InRange(borders.BottomBorderY, expected.BottomBorderY - BorderFractionTolerance, expected.BottomBorderY + BorderFractionTolerance);
+        // Outer guides should sit near the card edges (within 0-1 image space).
+        Assert.All(result.Overlay.OuterGuides, p =>
+        {
+            Assert.InRange(p.X, 0.0, 1.0);
+            Assert.InRange(p.Y, 0.0, 1.0);
+        });
+
+        // Inner guides should sit inside the outer-guide bbox.
+        var outerMinX = result.Overlay.OuterGuides.Min(p => p.X);
+        var outerMaxX = result.Overlay.OuterGuides.Max(p => p.X);
+        var outerMinY = result.Overlay.OuterGuides.Min(p => p.Y);
+        var outerMaxY = result.Overlay.OuterGuides.Max(p => p.Y);
+        Assert.All(result.Overlay.InnerGuides, p =>
+        {
+            Assert.InRange(p.X, outerMinX, outerMaxX);
+            Assert.InRange(p.Y, outerMinY, outerMaxY);
+        });
     }
 
     #endregion
@@ -158,128 +167,110 @@ public sealed class OpenCvImageAnalysisServiceTests
     #region RecalculateFromCorrection
 
     [Fact]
-    public void RecalculateFromCorrection_WithAdjustedBorders_RecomputesCentering()
+    public void RecalculateFromCorrection_AppliesUserCenteringPercentsAndPreservesOriginalScores()
     {
-        // Arrange - original result with 50/50 centering
-        var original = new ImageAnalysisResult
-        {
-            DetectedCentering = CenteringMeasurement.Perfect,
-            CornersScore = 9.0,
-            EdgesScore = 8.5,
-            SurfaceScore = 9.5,
-            DetectedDefects = [],
-            Overlay = new AnalysisOverlay
-            {
-                CardBoundary =
-                [
-                    new NormalizedPoint { X = 0.1, Y = 0.1 },
-                    new NormalizedPoint { X = 0.9, Y = 0.1 },
-                    new NormalizedPoint { X = 0.9, Y = 0.9 },
-                    new NormalizedPoint { X = 0.1, Y = 0.9 },
-                ],
-                BorderLines = new BorderLines
-                {
-                    LeftBorderX = 0.05,
-                    RightBorderX = 0.95,
-                    TopBorderY = 0.05,
-                    BottomBorderY = 0.95,
-                }
-            },
-            AnalyzedAt = DateTimeOffset.UtcNow,
-            AnalysisMethod = "OpenCV-v4"
-        };
-
-        // Correction shifts borders to 60/40 LR (left=0.06, right border at 0.96 so right width=0.04)
-        var correction = new UserCorrection
-        {
-            AdjustedBorders = new BorderLines
-            {
-                LeftBorderX = 0.06,
-                RightBorderX = 0.96,
-                TopBorderY = 0.05,
-                BottomBorderY = 0.95,
-            },
-            DismissedDefectIndices = [],
-        };
-
-        // Act
-        var result = _sut.RecalculateFromCorrection(original, correction);
-
-        // Assert - LR should now be 60% (0.06 / (0.06 + 0.04) * 100)
-        Assert.NotNull(result.DetectedCentering);
-        Assert.Equal(60.0, result.DetectedCentering.LeftRightFront);
-        Assert.Equal(50.0, result.DetectedCentering.TopBottomFront);
-        Assert.Equal("OpenCV-v4-corrected", result.AnalysisMethod);
-    }
-
-    [Fact]
-    public void RecalculateFromCorrection_WithNoChanges_ReturnsSameValues()
-    {
-        // Arrange
         var original = new ImageAnalysisResult
         {
             DetectedCentering = new CenteringMeasurement
             {
-                LeftRightFront = 55.0,
-                TopBottomFront = 48.0,
-                LeftRightBack = 50,
-                TopBottomBack = 50,
+                LeftRightFront = 50.0,
+                TopBottomFront = 50.0,
+                LeftRightBack = 60.0,
+                TopBottomBack = 55.0
             },
-            CornersScore = 8.0,
-            EdgesScore = 7.5,
-            SurfaceScore = 9.0,
-            DetectedDefects =
-            [
-                new DetectedDefect
-                {
-                    Type = "scratch",
-                    Severity = 0.3,
-                    X = 0.5,
-                    Y = 0.5,
-                    Width = 0.1,
-                    Height = 0.01,
-                    Confidence = 0.6,
-                }
-            ],
-            Overlay = new AnalysisOverlay
-            {
-                CardBoundary =
-                [
-                    new NormalizedPoint { X = 0.1, Y = 0.1 },
-                    new NormalizedPoint { X = 0.9, Y = 0.1 },
-                    new NormalizedPoint { X = 0.9, Y = 0.9 },
-                    new NormalizedPoint { X = 0.1, Y = 0.9 },
-                ],
-                BorderLines = new BorderLines
-                {
-                    LeftBorderX = 0.055,
-                    RightBorderX = 0.945,
-                    TopBorderY = 0.048,
-                    BottomBorderY = 0.952,
-                }
-            },
+            CornersScore = 9.0,
+            EdgesScore = 8.5,
+            SurfaceScore = 9.5,
+            DetectedDefects = [],
+            Overlay = MakeOverlay(50.0, 50.0),
             AnalyzedAt = DateTimeOffset.UtcNow,
             AnalysisMethod = "OpenCV-v4"
         };
 
-        // No corrections
         var correction = new UserCorrection
         {
-            DismissedDefectIndices = [],
+            CardImageId = Guid.NewGuid(),
+            OuterGuides = SquareEndpoints(0.10, 0.90, 0.10, 0.90),
+            InnerGuides = SquareEndpoints(0.16, 0.94, 0.14, 0.86),  // off-centre
+            LeftRightCenteringPercent = 60.0,
+            TopBottomCenteringPercent = 55.0
         };
 
-        // Act
         var result = _sut.RecalculateFromCorrection(original, correction);
 
-        // Assert - centering and scores should be unchanged
         Assert.NotNull(result.DetectedCentering);
-        Assert.Equal(original.DetectedCentering.LeftRightFront, result.DetectedCentering.LeftRightFront);
-        Assert.Equal(original.DetectedCentering.TopBottomFront, result.DetectedCentering.TopBottomFront);
-        Assert.Equal(original.CornersScore, result.CornersScore);
-        Assert.Equal(original.EdgesScore, result.EdgesScore);
-        Assert.Equal(original.SurfaceScore, result.SurfaceScore);
-        Assert.Single(result.DetectedDefects);
+        Assert.Equal(60.0, result.DetectedCentering.LeftRightFront);
+        Assert.Equal(55.0, result.DetectedCentering.TopBottomFront);
+        // Back-axis values are NOT reset by a front-of-card correction
+        Assert.Equal(60.0, result.DetectedCentering.LeftRightBack);
+        Assert.Equal(55.0, result.DetectedCentering.TopBottomBack);
+
+        // Condition scores survive untouched
+        Assert.Equal(9.0, result.CornersScore);
+        Assert.Equal(8.5, result.EdgesScore);
+        Assert.Equal(9.5, result.SurfaceScore);
+
+        // Overlay carries the new endpoints and the new percentages
+        Assert.NotNull(result.Overlay);
+        Assert.Equal(8, result.Overlay.OuterGuides.Count);
+        Assert.Equal(8, result.Overlay.InnerGuides.Count);
+        Assert.Equal(60.0, result.Overlay.LeftRightCenteringPercent);
+        Assert.Equal(55.0, result.Overlay.TopBottomCenteringPercent);
+
+        Assert.Equal("OpenCV-v4-corrected", result.AnalysisMethod);
     }
+
+    [Fact]
+    public void RecalculateFromCorrection_ReturnsIndependentReferenceGraph()
+    {
+        var original = new ImageAnalysisResult
+        {
+            DetectedCentering = CenteringMeasurement.Perfect,
+            CornersScore = 8.0,
+            EdgesScore = 8.0,
+            SurfaceScore = 8.0,
+            DetectedDefects = [],
+            Overlay = MakeOverlay(50.0, 50.0),
+            AnalyzedAt = DateTimeOffset.UtcNow,
+            AnalysisMethod = "OpenCV-v4"
+        };
+
+        var correction = new UserCorrection
+        {
+            CardImageId = Guid.NewGuid(),
+            OuterGuides = SquareEndpoints(0.10, 0.90, 0.10, 0.90),
+            InnerGuides = SquareEndpoints(0.15, 0.85, 0.15, 0.85),
+            LeftRightCenteringPercent = 50.0,
+            TopBottomCenteringPercent = 50.0
+        };
+
+        var result = _sut.RecalculateFromCorrection(original, correction);
+
+        Assert.NotSame(original.Overlay, result.Overlay);
+        Assert.NotSame(original.Overlay!.OuterGuides, result.Overlay!.OuterGuides);
+        Assert.NotSame(original.Overlay.InnerGuides, result.Overlay.InnerGuides);
+    }
+
+    /// <summary>
+    /// Builds the canonical 8-endpoint outer/inner guide pair tracing a
+    /// rectangle [xMin, xMax] x [yMin, yMax] in image-relative coordinates.
+    /// </summary>
+    private static List<NormalizedPoint> SquareEndpoints(double xMin, double xMax, double yMin, double yMax)
+    {
+        var tl = new NormalizedPoint { X = xMin, Y = yMin };
+        var tr = new NormalizedPoint { X = xMax, Y = yMin };
+        var br = new NormalizedPoint { X = xMax, Y = yMax };
+        var bl = new NormalizedPoint { X = xMin, Y = yMax };
+        return [tl, tr, tr, br, br, bl, bl, tl];
+    }
+
+    private static AnalysisOverlay MakeOverlay(double lr, double tb) => new()
+    {
+        OuterGuides = SquareEndpoints(0.05, 0.95, 0.05, 0.95),
+        InnerGuides = SquareEndpoints(0.10, 0.90, 0.10, 0.90),
+        LeftRightCenteringPercent = lr,
+        TopBottomCenteringPercent = tb
+    };
 
     #endregion
 }

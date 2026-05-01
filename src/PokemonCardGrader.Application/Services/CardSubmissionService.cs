@@ -287,9 +287,6 @@ public sealed class CardSubmissionService(
             {
                 Id = img.Id,
                 ImageUrl = imageStorageService.GetImageUrl(img.StoragePath),
-                NormalizedImageUrl = string.IsNullOrEmpty(img.NormalizedStoragePath)
-                    ? null
-                    : imageStorageService.GetImageUrl(img.NormalizedStoragePath),
                 ImageType = img.ImageType,
                 IsAnalyzed = img.LatestAnalysis is not null,
                 Overlay = img.LatestAnalysisResult?.Overlay,

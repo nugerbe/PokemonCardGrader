@@ -11,7 +11,6 @@ public sealed class CardImageConfiguration : IEntityTypeConfiguration<CardImage>
         builder.HasKey(e => e.Id);
         builder.Property(e => e.StoragePath).HasMaxLength(500).IsRequired();
         builder.Property(e => e.FileName).HasMaxLength(255).IsRequired();
-        builder.Property(e => e.NormalizedStoragePath).HasMaxLength(500);
 
         // 1-to-many to ImageAnalysisRecord. EF discovers the backing field
         // (_analysisRecords) automatically because the navigation collection

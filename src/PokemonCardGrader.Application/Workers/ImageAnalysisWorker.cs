@@ -74,31 +74,6 @@ public sealed class ImageAnalysisWorker(
                 return;
             }
 
-            // Persist the rectified ("Luxiv-flat") view if the analysis produced one.
-            // The bytes travel out-of-band on the outcome so they never hit the
-            // EF JSON column for AnalysisResult. Failures here are non-fatal —
-            // analysis still succeeds, the client just falls back to the original photo.
-            if (outcome.RectifiedImageJpeg is { Length: > 0 } bytes)
-            {
-                try
-                {
-                    var normalizedFileName = BuildNormalizedFileName(request.CardImageId);
-                    using var ms = new MemoryStream(bytes, writable: false);
-                    var normalizedPath = await storageService.SaveImageAsync(ms, normalizedFileName, ct);
-                    cardImage.SetNormalizedStoragePath(normalizedPath);
-
-                    logger.LogInformation(
-                        "Persisted rectified card image for {ImageId} at {Path} ({Bytes} bytes).",
-                        request.CardImageId, normalizedPath, bytes.Length);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex,
-                        "Failed to persist rectified image for {ImageId}; client will fall back to original photo.",
-                        request.CardImageId);
-                }
-            }
-
             // Append a new analysis record for this image. Append-only: every
             // analysis run (initial + any subsequent corrections) lives as its
             // own row; the latest by CreatedAt is the "current" view.
@@ -129,6 +104,4 @@ public sealed class ImageAnalysisWorker(
             request.CardSubmissionId);
     }
 
-    private static string BuildNormalizedFileName(Guid cardImageId) =>
-        $"{cardImageId:N}_normalized.jpg";
 }

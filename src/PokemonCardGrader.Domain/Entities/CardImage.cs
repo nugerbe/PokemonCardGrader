@@ -14,14 +14,6 @@ public sealed class CardImage
     public DateTimeOffset UploadedAt { get; private set; }
 
     /// <summary>
-    /// Storage path of the perspective-corrected (rectified) card image produced
-    /// during analysis. When set, the client renders this as the primary view in
-    /// the centering overlay editor — equivalent to the user laying the card flat
-    /// under a transparent grading template. Null until analysis completes.
-    /// </summary>
-    public string? NormalizedStoragePath { get; private set; }
-
-    /// <summary>
     /// All analysis records for this image, append-only. The "current" analysis
     /// is the one with the latest <see cref="ImageAnalysisRecord.CreatedAt"/> —
     /// see <see cref="LatestAnalysis"/>. Repositories that load images for read
@@ -58,11 +50,6 @@ public sealed class CardImage
             FileSizeBytes = fileSizeBytes,
             UploadedAt = DateTimeOffset.UtcNow
         };
-    }
-
-    public void SetNormalizedStoragePath(string? path)
-    {
-        NormalizedStoragePath = string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
     /// <summary>
