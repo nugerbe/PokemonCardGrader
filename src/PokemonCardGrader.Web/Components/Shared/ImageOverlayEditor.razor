@@ -514,15 +514,39 @@
 
     // --- Auto-submit ---
 
+    /// <summary>
+    /// Wait this long after the last user adjustment before sending the correction
+    /// to the server. Each new adjustment cancels and restarts the timer, so a
+    /// burst of drags collapses into a single server roundtrip on settle. Inline
+    /// centering readouts update instantly via the JS overlay's local math —
+    /// only the persisted recalc + re-estimate is debounced.
+    /// </summary>
+    private static readonly TimeSpan AutoSubmitDebounce = TimeSpan.FromMilliseconds(750);
+
     private async Task AutoSubmitCorrection()
     {
         _autoSubmitCts?.Cancel();
         _autoSubmitCts?.Dispose();
         _autoSubmitCts = new CancellationTokenSource();
+        var token = _autoSubmitCts.Token;
 
         _isRecalculating = true;
         StateHasChanged();
 
+        try
+        {
+            await Task.Delay(AutoSubmitDebounce, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer adjustment came in while we were waiting — the chained
+            // call will do the actual submit. Leave _isRecalculating true so
+            // the spinner stays visible across the burst.
+            return;
+        }
+
+        // Snapshot at submit time (not debounce-start time) so the latest
+        // adjustment in a burst is what gets sent.
         var correction = new UserCorrection
         {
             CardImageId = CardImageId,
@@ -541,10 +565,15 @@
             correction.AdjustedBoundary is not null,
             correction.DismissedDefectIndices.Count);
 
-        await OnCorrectionSubmitted.InvokeAsync(correction);
-
-        _isRecalculating = false;
-        StateHasChanged();
+        try
+        {
+            await OnCorrectionSubmitted.InvokeAsync(correction);
+        }
+        finally
+        {
+            _isRecalculating = false;
+            StateHasChanged();
+        }
     }
 
     private async Task Reset()
