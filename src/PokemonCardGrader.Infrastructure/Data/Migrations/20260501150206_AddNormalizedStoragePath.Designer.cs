@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PokemonCardGrader.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using PokemonCardGrader.Infrastructure.Data;
 namespace PokemonCardGrader.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260501150206_AddNormalizedStoragePath")]
+    partial class AddNormalizedStoragePath
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -153,6 +156,30 @@ namespace PokemonCardGrader.Infrastructure.Data.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("PokemonCardGrader.Domain.Entities.AnalysisCorrection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CardImageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CardSubmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CardSubmissionId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("AnalysisCorrections");
                 });
 
             modelBuilder.Entity("PokemonCardGrader.Domain.Entities.CardImage", b =>
@@ -306,29 +333,6 @@ namespace PokemonCardGrader.Infrastructure.Data.Migrations
                     b.HasIndex("Company", "ActualGrade");
 
                     b.ToTable("GradingResults");
-                });
-
-            modelBuilder.Entity("PokemonCardGrader.Domain.Entities.ImageAnalysisRecord", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("CardImageId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CardImageId", "CreatedAt")
-                        .HasDatabaseName("IX_ImageAnalysisRecords_CardImageId_CreatedAt");
-
-                    b.ToTable("ImageAnalysisRecords", (string)null);
                 });
 
             modelBuilder.Entity("PokemonCardGrader.Domain.Entities.PokemonCard", b =>
@@ -504,6 +508,235 @@ namespace PokemonCardGrader.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("PokemonCardGrader.Domain.Entities.AnalysisCorrection", b =>
+                {
+                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ConditionScores", "CorrectedScores", b1 =>
+                        {
+                            b1.Property<Guid>("AnalysisCorrectionId");
+
+                            b1.Property<double>("Corners");
+
+                            b1.Property<double>("Edges");
+
+                            b1.Property<double>("Surface");
+
+                            b1.HasKey("AnalysisCorrectionId");
+
+                            b1.ToTable("AnalysisCorrections");
+
+                            b1
+                                .ToJson("CorrectedScores")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AnalysisCorrectionId");
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CenteringMeasurement", "Centering", b2 =>
+                                {
+                                    b2.Property<Guid>("ConditionScoresAnalysisCorrectionId");
+
+                                    b2.Property<double>("LeftRightBack");
+
+                                    b2.Property<double>("LeftRightFront");
+
+                                    b2.Property<double>("TopBottomBack");
+
+                                    b2.Property<double>("TopBottomFront");
+
+                                    b2.HasKey("ConditionScoresAnalysisCorrectionId");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ConditionScoresAnalysisCorrectionId");
+                                });
+
+                            b1.Navigation("Centering")
+                                .IsRequired();
+                        });
+
+                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.AnalysisOverlay", "OriginalOverlay", b1 =>
+                        {
+                            b1.Property<Guid>("AnalysisCorrectionId");
+
+                            b1.HasKey("AnalysisCorrectionId");
+
+                            b1.ToTable("AnalysisCorrections");
+
+                            b1
+                                .ToJson("OriginalOverlay")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AnalysisCorrectionId");
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.BorderLines", "BorderLines", b2 =>
+                                {
+                                    b2.Property<Guid>("AnalysisOverlayAnalysisCorrectionId");
+
+                                    b2.Property<double>("BottomBorderY");
+
+                                    b2.Property<double>("LeftBorderX");
+
+                                    b2.Property<double>("RightBorderX");
+
+                                    b2.Property<double>("TopBorderY");
+
+                                    b2.HasKey("AnalysisOverlayAnalysisCorrectionId");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("AnalysisOverlayAnalysisCorrectionId");
+                                });
+
+                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.NormalizedPoint", "CardBoundary", b2 =>
+                                {
+                                    b2.Property<Guid>("AnalysisOverlayAnalysisCorrectionId");
+
+                                    b2.Property<int>("__synthesizedOrdinal")
+                                        .ValueGeneratedOnAddOrUpdate();
+
+                                    b2.Property<double>("X");
+
+                                    b2.Property<double>("Y");
+
+                                    b2.HasKey("AnalysisOverlayAnalysisCorrectionId", "__synthesizedOrdinal");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("AnalysisOverlayAnalysisCorrectionId");
+                                });
+
+                            b1.Navigation("BorderLines")
+                                .IsRequired();
+
+                            b1.Navigation("CardBoundary");
+                        });
+
+                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ConditionScores", "OriginalScores", b1 =>
+                        {
+                            b1.Property<Guid>("AnalysisCorrectionId");
+
+                            b1.Property<double>("Corners");
+
+                            b1.Property<double>("Edges");
+
+                            b1.Property<double>("Surface");
+
+                            b1.HasKey("AnalysisCorrectionId");
+
+                            b1.ToTable("AnalysisCorrections");
+
+                            b1
+                                .ToJson("OriginalScores")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AnalysisCorrectionId");
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CenteringMeasurement", "Centering", b2 =>
+                                {
+                                    b2.Property<Guid>("ConditionScoresAnalysisCorrectionId");
+
+                                    b2.Property<double>("LeftRightBack");
+
+                                    b2.Property<double>("LeftRightFront");
+
+                                    b2.Property<double>("TopBottomBack");
+
+                                    b2.Property<double>("TopBottomFront");
+
+                                    b2.HasKey("ConditionScoresAnalysisCorrectionId");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ConditionScoresAnalysisCorrectionId");
+                                });
+
+                            b1.Navigation("Centering")
+                                .IsRequired();
+                        });
+
+                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.UserCorrection", "Correction", b1 =>
+                        {
+                            b1.Property<Guid>("AnalysisCorrectionId");
+
+                            b1.Property<Guid>("CardImageId");
+
+                            b1.PrimitiveCollection<string>("DismissedDefectIndices")
+                                .IsRequired();
+
+                            b1.HasKey("AnalysisCorrectionId");
+
+                            b1.ToTable("AnalysisCorrections");
+
+                            b1
+                                .ToJson("Correction")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AnalysisCorrectionId");
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.BorderLines", "AdjustedBorders", b2 =>
+                                {
+                                    b2.Property<Guid>("UserCorrectionAnalysisCorrectionId");
+
+                                    b2.Property<double>("BottomBorderY");
+
+                                    b2.Property<double>("LeftBorderX");
+
+                                    b2.Property<double>("RightBorderX");
+
+                                    b2.Property<double>("TopBorderY");
+
+                                    b2.HasKey("UserCorrectionAnalysisCorrectionId");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("UserCorrectionAnalysisCorrectionId");
+                                });
+
+                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.NormalizedPoint", "AdjustedBoundary", b2 =>
+                                {
+                                    b2.Property<Guid>("UserCorrectionAnalysisCorrectionId");
+
+                                    b2.Property<int>("__synthesizedOrdinal")
+                                        .ValueGeneratedOnAddOrUpdate();
+
+                                    b2.Property<double>("X");
+
+                                    b2.Property<double>("Y");
+
+                                    b2.HasKey("UserCorrectionAnalysisCorrectionId", "__synthesizedOrdinal");
+
+                                    b2.ToTable("AnalysisCorrections");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("UserCorrectionAnalysisCorrectionId");
+                                });
+
+                            b1.Navigation("AdjustedBorders");
+
+                            b1.Navigation("AdjustedBoundary");
+                        });
+
+                    b.Navigation("CorrectedScores")
+                        .IsRequired();
+
+                    b.Navigation("Correction")
+                        .IsRequired();
+
+                    b.Navigation("OriginalOverlay")
+                        .IsRequired();
+
+                    b.Navigation("OriginalScores")
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("PokemonCardGrader.Domain.Entities.CardImage", b =>
                 {
                     b.HasOne("PokemonCardGrader.Domain.Entities.CardSubmission", null)
@@ -511,6 +744,501 @@ namespace PokemonCardGrader.Infrastructure.Data.Migrations
                         .HasForeignKey("CardSubmissionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ImageAnalysisResult", "AnalysisResult", b1 =>
+                        {
+                            b1.Property<Guid>("CardImageId");
+
+                            b1.Property<string>("AnalysisMethod")
+                                .IsRequired();
+
+                            b1.Property<DateTimeOffset>("AnalyzedAt");
+
+                            b1.Property<double?>("CornersScore");
+
+                            b1.Property<bool>("DefectModelUsed");
+
+                            b1.Property<double?>("EdgesScore");
+
+                            b1.Property<double?>("HybridMlConfidence");
+
+                            b1.Property<bool>("HybridMlUsed");
+
+                            b1.Property<double?>("ImageQualityScore");
+
+                            b1.Property<double?>("MlSurfaceScore");
+
+                            b1.Property<double?>("OverallConfidence");
+
+                            b1.Property<bool>("SurfaceModelUsed");
+
+                            b1.Property<double?>("SurfaceScore");
+
+                            b1.HasKey("CardImageId");
+
+                            b1.ToTable("CardImages");
+
+                            b1
+                                .ToJson("AnalysisResult")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("CardImageId");
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CardFeatures", "Features", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.PrimitiveCollection<string>("BorderThickness")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("CenteringDeviation")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("ColorHistogram")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("CornerGeometry")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("CornerWhitening")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("EdgeRoughness")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("EdgeWhitening")
+                                        .IsRequired();
+
+                                    b2.Property<double>("Sharpness");
+
+                                    b2.PrimitiveCollection<string>("SurfaceTexture")
+                                        .IsRequired();
+
+                                    b2.PrimitiveCollection<string>("SurfaceVariance")
+                                        .IsRequired();
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CardRegions", "Regions", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+
+                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "ArtworkRegion", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "BorderRegion", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.RegionRect", "CornerZones", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("__synthesizedOrdinal")
+                                                .ValueGeneratedOnAddOrUpdate();
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId", "__synthesizedOrdinal");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.RegionRect", "EdgeZones", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("__synthesizedOrdinal")
+                                                .ValueGeneratedOnAddOrUpdate();
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId", "__synthesizedOrdinal");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "InnerRegion", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "TextRegion", b3 =>
+                                        {
+                                            b3.Property<Guid>("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("Height");
+
+                                            b3.Property<string>("Label")
+                                                .IsRequired();
+
+                                            b3.Property<int>("Width");
+
+                                            b3.Property<int>("X");
+
+                                            b3.Property<int>("Y");
+
+                                            b3.HasKey("CardRegionsImageAnalysisResultCardImageId");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("CardRegionsImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.Navigation("ArtworkRegion")
+                                        .IsRequired();
+
+                                    b2.Navigation("BorderRegion")
+                                        .IsRequired();
+
+                                    b2.Navigation("CornerZones");
+
+                                    b2.Navigation("EdgeZones");
+
+                                    b2.Navigation("InnerRegion")
+                                        .IsRequired();
+
+                                    b2.Navigation("TextRegion")
+                                        .IsRequired();
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ConfidenceBreakdown", "ConfidenceDetail", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<double>("BorderConsistency");
+
+                                    b2.Property<double>("CvMlAgreement");
+
+                                    b2.Property<double>("DetectionReliability");
+
+                                    b2.Property<double>("ImageQuality");
+
+                                    b2.Property<double>("Overall");
+
+                                    b2.Property<string>("Summary")
+                                        .IsRequired();
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.FailureDetectionResult", "FailureDetection", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<double>("Confidence");
+
+                                    b2.Property<string>("Description");
+
+                                    b2.Property<int>("DetectedCardCount");
+
+                                    b2.Property<string>("FailureType");
+
+                                    b2.Property<bool>("HasBlockingFailure");
+
+                                    b2.Property<bool>("IsOccluded");
+
+                                    b2.Property<bool>("IsSleevedOrTopLoaded");
+
+                                    b2.Property<double>("VisibleAreaFraction");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CenteringMeasurement", "DetectedCentering", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<double>("LeftRightBack");
+
+                                    b2.Property<double>("LeftRightFront");
+
+                                    b2.Property<double>("TopBottomBack");
+
+                                    b2.Property<double>("TopBottomFront");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.DetectedDefect", "DetectedDefects", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<int>("__synthesizedOrdinal")
+                                        .ValueGeneratedOnAddOrUpdate();
+
+                                    b2.Property<double>("Confidence");
+
+                                    b2.Property<double>("Height");
+
+                                    b2.Property<double>("Severity");
+
+                                    b2.Property<string>("Type")
+                                        .IsRequired();
+
+                                    b2.Property<double>("Width");
+
+                                    b2.Property<double>("X");
+
+                                    b2.Property<double>("Y");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId", "__synthesizedOrdinal");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.DetectedDefect", "MlDetectedDefects", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<int>("__synthesizedOrdinal")
+                                        .ValueGeneratedOnAddOrUpdate();
+
+                                    b2.Property<double>("Confidence");
+
+                                    b2.Property<double>("Height");
+
+                                    b2.Property<double>("Severity");
+
+                                    b2.Property<string>("Type")
+                                        .IsRequired();
+
+                                    b2.Property<double>("Width");
+
+                                    b2.Property<double>("X");
+
+                                    b2.Property<double>("Y");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId", "__synthesizedOrdinal");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.AnalysisOverlay", "Overlay", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+
+                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.BorderLines", "BorderLines", b3 =>
+                                        {
+                                            b3.Property<Guid>("AnalysisOverlayImageAnalysisResultCardImageId");
+
+                                            b3.Property<double>("BottomBorderY");
+
+                                            b3.Property<double>("LeftBorderX");
+
+                                            b3.Property<double>("RightBorderX");
+
+                                            b3.Property<double>("TopBorderY");
+
+                                            b3.HasKey("AnalysisOverlayImageAnalysisResultCardImageId");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("AnalysisOverlayImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.NormalizedPoint", "CardBoundary", b3 =>
+                                        {
+                                            b3.Property<Guid>("AnalysisOverlayImageAnalysisResultCardImageId");
+
+                                            b3.Property<int>("__synthesizedOrdinal")
+                                                .ValueGeneratedOnAddOrUpdate();
+
+                                            b3.Property<double>("X");
+
+                                            b3.Property<double>("Y");
+
+                                            b3.HasKey("AnalysisOverlayImageAnalysisResultCardImageId", "__synthesizedOrdinal");
+
+                                            b3.ToTable("CardImages");
+
+                                            b3.WithOwner()
+                                                .HasForeignKey("AnalysisOverlayImageAnalysisResultCardImageId");
+                                        });
+
+                                    b2.Navigation("BorderLines")
+                                        .IsRequired();
+
+                                    b2.Navigation("CardBoundary");
+                                });
+
+                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ImageQualityAssessment", "QualityAssessment", b2 =>
+                                {
+                                    b2.Property<Guid>("ImageAnalysisResultCardImageId");
+
+                                    b2.Property<double>("ExposureScore");
+
+                                    b2.Property<double>("GlareScore");
+
+                                    b2.PrimitiveCollection<string>("Issues")
+                                        .IsRequired();
+
+                                    b2.Property<double>("NoiseScore");
+
+                                    b2.Property<double>("OverallScore");
+
+                                    b2.Property<bool>("PassedGate");
+
+                                    b2.Property<string>("RecommendedAction")
+                                        .IsRequired();
+
+                                    b2.Property<double>("ResolutionScore");
+
+                                    b2.Property<double>("SharpnessScore");
+
+                                    b2.HasKey("ImageAnalysisResultCardImageId");
+
+                                    b2.ToTable("CardImages");
+
+                                    b2.WithOwner()
+                                        .HasForeignKey("ImageAnalysisResultCardImageId");
+                                });
+
+                            b1.Navigation("ConfidenceDetail");
+
+                            b1.Navigation("DetectedCentering");
+
+                            b1.Navigation("DetectedDefects");
+
+                            b1.Navigation("FailureDetection");
+
+                            b1.Navigation("Features");
+
+                            b1.Navigation("MlDetectedDefects");
+
+                            b1.Navigation("Overlay");
+
+                            b1.Navigation("QualityAssessment");
+
+                            b1.Navigation("Regions");
+                        });
+
+                    b.Navigation("AnalysisResult");
                 });
 
             modelBuilder.Entity("PokemonCardGrader.Domain.Entities.CardSubmission", b =>
@@ -681,516 +1409,6 @@ namespace PokemonCardGrader.Infrastructure.Data.Migrations
                         .HasForeignKey("PokemonCardGrader.Domain.Entities.GradingResult", "CardSubmissionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("PokemonCardGrader.Domain.Entities.ImageAnalysisRecord", b =>
-                {
-                    b.HasOne("PokemonCardGrader.Domain.Entities.CardImage", null)
-                        .WithMany("AnalysisRecords")
-                        .HasForeignKey("CardImageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ImageAnalysisResult", "Result", b1 =>
-                        {
-                            b1.Property<Guid>("ImageAnalysisRecordId");
-
-                            b1.Property<string>("AnalysisMethod")
-                                .IsRequired();
-
-                            b1.Property<DateTimeOffset>("AnalyzedAt");
-
-                            b1.Property<double?>("CornersScore");
-
-                            b1.Property<bool>("DefectModelUsed");
-
-                            b1.Property<double?>("EdgesScore");
-
-                            b1.Property<double?>("HybridMlConfidence");
-
-                            b1.Property<bool>("HybridMlUsed");
-
-                            b1.Property<double?>("ImageQualityScore");
-
-                            b1.Property<double?>("MlSurfaceScore");
-
-                            b1.Property<double?>("OverallConfidence");
-
-                            b1.Property<bool>("SurfaceModelUsed");
-
-                            b1.Property<double?>("SurfaceScore");
-
-                            b1.HasKey("ImageAnalysisRecordId");
-
-                            b1.ToTable("ImageAnalysisRecords");
-
-                            b1
-                                .ToJson("Result")
-                                .HasColumnType("nvarchar(max)");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ImageAnalysisRecordId");
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.AnalysisOverlay", "Overlay", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.BorderLines", "BorderLines", b3 =>
-                                        {
-                                            b3.Property<Guid>("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<double>("BottomBorderY");
-
-                                            b3.Property<double>("LeftBorderX");
-
-                                            b3.Property<double>("RightBorderX");
-
-                                            b3.Property<double>("TopBorderY");
-
-                                            b3.HasKey("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.NormalizedPoint", "CardBoundary", b3 =>
-                                        {
-                                            b3.Property<Guid>("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("__synthesizedOrdinal")
-                                                .ValueGeneratedOnAddOrUpdate();
-
-                                            b3.Property<double>("X");
-
-                                            b3.Property<double>("Y");
-
-                                            b3.HasKey("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId", "__synthesizedOrdinal");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("AnalysisOverlayImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.Navigation("BorderLines")
-                                        .IsRequired();
-
-                                    b2.Navigation("CardBoundary");
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CardFeatures", "Features", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.PrimitiveCollection<string>("BorderThickness")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("CenteringDeviation")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("ColorHistogram")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("CornerGeometry")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("CornerWhitening")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("EdgeRoughness")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("EdgeWhitening")
-                                        .IsRequired();
-
-                                    b2.Property<double>("Sharpness");
-
-                                    b2.PrimitiveCollection<string>("SurfaceTexture")
-                                        .IsRequired();
-
-                                    b2.PrimitiveCollection<string>("SurfaceVariance")
-                                        .IsRequired();
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CardRegions", "Regions", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "ArtworkRegion", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "BorderRegion", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.RegionRect", "CornerZones", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("__synthesizedOrdinal")
-                                                .ValueGeneratedOnAddOrUpdate();
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId", "__synthesizedOrdinal");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsMany("PokemonCardGrader.Domain.ValueObjects.RegionRect", "EdgeZones", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("__synthesizedOrdinal")
-                                                .ValueGeneratedOnAddOrUpdate();
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId", "__synthesizedOrdinal");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "InnerRegion", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.OwnsOne("PokemonCardGrader.Domain.ValueObjects.RegionRect", "TextRegion", b3 =>
-                                        {
-                                            b3.Property<Guid>("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.Property<int>("Height");
-
-                                            b3.Property<string>("Label")
-                                                .IsRequired();
-
-                                            b3.Property<int>("Width");
-
-                                            b3.Property<int>("X");
-
-                                            b3.Property<int>("Y");
-
-                                            b3.HasKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-
-                                            b3.ToTable("ImageAnalysisRecords");
-
-                                            b3.WithOwner()
-                                                .HasForeignKey("CardRegionsImageAnalysisResultImageAnalysisRecordId");
-                                        });
-
-                                    b2.Navigation("ArtworkRegion")
-                                        .IsRequired();
-
-                                    b2.Navigation("BorderRegion")
-                                        .IsRequired();
-
-                                    b2.Navigation("CornerZones");
-
-                                    b2.Navigation("EdgeZones");
-
-                                    b2.Navigation("InnerRegion")
-                                        .IsRequired();
-
-                                    b2.Navigation("TextRegion")
-                                        .IsRequired();
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ConfidenceBreakdown", "ConfidenceDetail", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<double>("BorderConsistency");
-
-                                    b2.Property<double>("CvMlAgreement");
-
-                                    b2.Property<double>("DetectionReliability");
-
-                                    b2.Property<double>("ImageQuality");
-
-                                    b2.Property<double>("Overall");
-
-                                    b2.Property<string>("Summary")
-                                        .IsRequired();
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.FailureDetectionResult", "FailureDetection", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<double>("Confidence");
-
-                                    b2.Property<string>("Description");
-
-                                    b2.Property<int>("DetectedCardCount");
-
-                                    b2.Property<string>("FailureType");
-
-                                    b2.Property<bool>("HasBlockingFailure");
-
-                                    b2.Property<bool>("IsOccluded");
-
-                                    b2.Property<bool>("IsSleevedOrTopLoaded");
-
-                                    b2.Property<double>("VisibleAreaFraction");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.CenteringMeasurement", "DetectedCentering", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<double>("LeftRightBack");
-
-                                    b2.Property<double>("LeftRightFront");
-
-                                    b2.Property<double>("TopBottomBack");
-
-                                    b2.Property<double>("TopBottomFront");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.DetectedDefect", "DetectedDefects", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<int>("__synthesizedOrdinal")
-                                        .ValueGeneratedOnAddOrUpdate();
-
-                                    b2.Property<double>("Confidence");
-
-                                    b2.Property<double>("Height");
-
-                                    b2.Property<double>("Severity");
-
-                                    b2.Property<string>("Type")
-                                        .IsRequired();
-
-                                    b2.Property<double>("Width");
-
-                                    b2.Property<double>("X");
-
-                                    b2.Property<double>("Y");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId", "__synthesizedOrdinal");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsMany("PokemonCardGrader.Domain.ValueObjects.DetectedDefect", "MlDetectedDefects", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<int>("__synthesizedOrdinal")
-                                        .ValueGeneratedOnAddOrUpdate();
-
-                                    b2.Property<double>("Confidence");
-
-                                    b2.Property<double>("Height");
-
-                                    b2.Property<double>("Severity");
-
-                                    b2.Property<string>("Type")
-                                        .IsRequired();
-
-                                    b2.Property<double>("Width");
-
-                                    b2.Property<double>("X");
-
-                                    b2.Property<double>("Y");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId", "__synthesizedOrdinal");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.OwnsOne("PokemonCardGrader.Domain.ValueObjects.ImageQualityAssessment", "QualityAssessment", b2 =>
-                                {
-                                    b2.Property<Guid>("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.Property<double>("ExposureScore");
-
-                                    b2.Property<double>("GlareScore");
-
-                                    b2.PrimitiveCollection<string>("Issues")
-                                        .IsRequired();
-
-                                    b2.Property<double>("NoiseScore");
-
-                                    b2.Property<double>("OverallScore");
-
-                                    b2.Property<bool>("PassedGate");
-
-                                    b2.Property<string>("RecommendedAction")
-                                        .IsRequired();
-
-                                    b2.Property<double>("ResolutionScore");
-
-                                    b2.Property<double>("SharpnessScore");
-
-                                    b2.HasKey("ImageAnalysisResultImageAnalysisRecordId");
-
-                                    b2.ToTable("ImageAnalysisRecords");
-
-                                    b2.WithOwner()
-                                        .HasForeignKey("ImageAnalysisResultImageAnalysisRecordId");
-                                });
-
-                            b1.Navigation("ConfidenceDetail");
-
-                            b1.Navigation("DetectedCentering");
-
-                            b1.Navigation("DetectedDefects");
-
-                            b1.Navigation("FailureDetection");
-
-                            b1.Navigation("Features");
-
-                            b1.Navigation("MlDetectedDefects");
-
-                            b1.Navigation("Overlay");
-
-                            b1.Navigation("QualityAssessment");
-
-                            b1.Navigation("Regions");
-                        });
-
-                    b.Navigation("Result")
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("PokemonCardGrader.Domain.Entities.CardImage", b =>
-                {
-                    b.Navigation("AnalysisRecords");
                 });
 
             modelBuilder.Entity("PokemonCardGrader.Domain.Entities.CardSubmission", b =>
