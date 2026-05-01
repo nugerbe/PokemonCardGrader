@@ -141,16 +141,17 @@ public sealed class CardSubmissionRepository(
         return Task.CompletedTask;
     }
 
-    public async Task AddCorrectionAsync(AnalysisCorrection correction, CancellationToken ct = default)
+    public async Task<List<ImageAnalysisRecord>> GetRecentUserCorrectionRecordsAsync(
+        int maxCount = 500,
+        CancellationToken ct = default)
     {
-        await db.AnalysisCorrections.AddAsync(correction, ct);
-    }
-
-    public async Task<List<AnalysisCorrection>> GetCorrectionsWithAdjustedBordersAsync(int maxCount = 500, CancellationToken ct = default)
-    {
-        return await db.AnalysisCorrections
+        // UserCorrection-source records ARE the first-class corrections —
+        // every user border drag, corner adjustment, or defect dismissal
+        // results in a fresh row written by ApplyUserCorrectionAsync.
+        return await db.ImageAnalysisRecords
             .AsNoTracking()
-            .OrderByDescending(c => c.CreatedAt)
+            .Where(r => r.Source == Domain.Enums.AnalysisRecordSource.UserCorrection)
+            .OrderByDescending(r => r.CreatedAt)
             .Take(maxCount)
             .ToListAsync(ct);
     }

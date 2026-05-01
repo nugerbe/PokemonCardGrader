@@ -195,25 +195,21 @@ public sealed class CardSubmissionService(
             ?? throw new InvalidOperationException("Submission not found.");
 
         // Find the image inside the loaded submission graph (which includes the
-        // latest analysis record per image via filtered include). No need to
-        // separately track CardImage for mutation — we only insert a new
-        // ImageAnalysisRecord row.
+        // latest analysis record per image via filtered include). Drawing the
+        // image FROM the submission also gives us the submission-ownership check
+        // for free — no need for a separate CardSubmissionId comparison.
         var image = submission.Images.FirstOrDefault(i => i.Id == correction.CardImageId)
             ?? throw new InvalidOperationException("Image not found.");
-
-        if (image.CardSubmissionId != submissionId)
-            throw new InvalidOperationException("Image does not belong to this submission.");
 
         var latestResult = image.LatestAnalysisResult
             ?? throw new InvalidOperationException("Image has not been analyzed yet.");
 
-        // Capture original state for learning (snapshot of the row we're about to supersede)
-        var originalOverlay = latestResult.Overlay;
-        var originalScores = submission.ImageDerivedScores;
-
         // Recalculate scores from the correction. Note: this returns a NEW
         // ImageAnalysisResult built off the previous one — append-only model
         // means we never mutate `latestResult`, we just write the new one.
+        // The previous Initial-source record stays in place; the diff between
+        // it and this new UserCorrection-source row IS the supervised
+        // training signal consumed by BorderPredictionService.
         var updatedResult = imageAnalysisService.RecalculateFromCorrection(
             latestResult, correction);
 
@@ -225,74 +221,11 @@ public sealed class CardSubmissionService(
 
         await submissionRepository.SaveChangesResolvingConcurrencyAsync(ct);
 
-        // Re-combine all image scores and re-estimate
+        // Re-combine all image scores and re-estimate. The new
+        // UserCorrection-source ImageAnalysisRecord is now the audit-trail
+        // and training-data row in one — BorderPredictionService reads
+        // these directly via GetRecentUserCorrectionRecordsAsync.
         await CombineAndSetImageScoresAsync(submissionId, ct);
-
-        // Store correction as learning data (non-blocking)
-        if (originalOverlay is not null && originalScores is not null)
-        {
-            // Reload submission to get the new combined scores
-            var updated = await submissionRepository.GetByIdReadOnlyAsync(submissionId, userId, ct);
-            if (updated?.ImageDerivedScores is not null)
-            {
-                // Deep-copy owned types so EF Core doesn't track the same instances
-                // under two different ownership chains (ImageAnalysisResult vs AnalysisCorrection).
-                var overlayCopy = new AnalysisOverlay
-                {
-                    CardBoundary = originalOverlay.CardBoundary
-                        .Select(p => new NormalizedPoint { X = p.X, Y = p.Y }).ToList(),
-                    BorderLines = new BorderLines
-                    {
-                        LeftBorderX = originalOverlay.BorderLines.LeftBorderX,
-                        RightBorderX = originalOverlay.BorderLines.RightBorderX,
-                        TopBorderY = originalOverlay.BorderLines.TopBorderY,
-                        BottomBorderY = originalOverlay.BorderLines.BottomBorderY
-                    }
-                };
-
-                var scoresCopy = new ConditionScores
-                {
-                    Centering = new CenteringMeasurement
-                    {
-                        LeftRightFront = originalScores.Centering.LeftRightFront,
-                        TopBottomFront = originalScores.Centering.TopBottomFront,
-                        LeftRightBack = originalScores.Centering.LeftRightBack,
-                        TopBottomBack = originalScores.Centering.TopBottomBack
-                    },
-                    Corners = originalScores.Corners,
-                    Edges = originalScores.Edges,
-                    Surface = originalScores.Surface
-                };
-
-                var correctionCopy = new UserCorrection
-                {
-                    CardImageId = correction.CardImageId,
-                    AdjustedBoundary = correction.AdjustedBoundary?
-                        .Select(p => new NormalizedPoint { X = p.X, Y = p.Y }).ToList(),
-                    AdjustedBorders = correction.AdjustedBorders is { } ab
-                        ? new BorderLines
-                        {
-                            LeftBorderX = ab.LeftBorderX,
-                            RightBorderX = ab.RightBorderX,
-                            TopBorderY = ab.TopBorderY,
-                            BottomBorderY = ab.BottomBorderY
-                        }
-                        : null,
-                    DismissedDefectIndices = [..correction.DismissedDefectIndices]
-                };
-
-                var correctionRecord = AnalysisCorrection.Create(
-                    correction.CardImageId,
-                    submissionId,
-                    overlayCopy,
-                    scoresCopy,
-                    correctionCopy,
-                    updated.ImageDerivedScores);
-
-                await submissionRepository.AddCorrectionAsync(correctionRecord, ct);
-                await submissionRepository.SaveChangesAsync(ct);
-            }
-        }
     }
 
     public async Task DeleteSubmissionAsync(Guid id, string userId, CancellationToken ct = default)

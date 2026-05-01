@@ -46,12 +46,15 @@ public sealed class BorderPredictionService(
 
     private async Task<BorderPrior?> ComputePriorAsync(CancellationToken ct)
     {
-        var corrections = await repository.GetCorrectionsWithAdjustedBordersAsync(MaxSamples, ct);
+        // Border priors are now derived from UserCorrection-source analysis
+        // records — each one is the recalculated analysis after the user
+        // dragged the border guides into place. The BorderLines on the
+        // record's Result are the user-confirmed positions.
+        var records = await repository.GetRecentUserCorrectionRecordsAsync(MaxSamples, ct);
 
-        // Filter to only corrections where the user actually adjusted borders
-        var withBorders = corrections
-            .Where(c => c.Correction.AdjustedBorders is not null)
-            .Select(c => c.Correction.AdjustedBorders!)
+        var withBorders = records
+            .Where(r => r.Result.Overlay?.BorderLines is not null)
+            .Select(r => r.Result.Overlay!.BorderLines)
             .ToList();
 
         if (withBorders.Count < MinSamplesForPrior)

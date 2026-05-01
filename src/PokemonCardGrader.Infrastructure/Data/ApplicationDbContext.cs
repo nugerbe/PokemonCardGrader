@@ -13,7 +13,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ImageAnalysisRecord> ImageAnalysisRecords => Set<ImageAnalysisRecord>();
     public DbSet<GradeEstimate> GradeEstimates => Set<GradeEstimate>();
     public DbSet<GradingResult> GradingResults => Set<GradingResult>();
-    public DbSet<AnalysisCorrection> AnalysisCorrections => Set<AnalysisCorrection>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
