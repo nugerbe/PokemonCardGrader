@@ -291,6 +291,7 @@
                                     <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3);margin-bottom:6px">FRONT</div>
                                     <ImageOverlayEditor ImageUrl="@(frontAnalyzed?.ImageUrl ?? string.Empty)"
                                                         LocalImageDataUrl="@(frontAnalyzed is null ? _frontLocalDataUrl : null)"
+                                                        NormalizedImageUrl="@frontAnalyzed?.NormalizedImageUrl"
                                                         ImmediateMode="@(frontAnalyzed is null)"
                                                         Overlay="@frontAnalyzed?.Overlay"
                                                         DetectedDefects="@frontAnalyzed?.DetectedDefects"
@@ -305,6 +306,7 @@
                                     <div class="mono" style="font-size:10px;letter-spacing:0.08em;color:var(--ink-3);margin-bottom:6px">BACK</div>
                                     <ImageOverlayEditor ImageUrl="@(backAnalyzed?.ImageUrl ?? string.Empty)"
                                                         LocalImageDataUrl="@(backAnalyzed is null ? _backLocalDataUrl : null)"
+                                                        NormalizedImageUrl="@backAnalyzed?.NormalizedImageUrl"
                                                         ImmediateMode="@(backAnalyzed is null)"
                                                         Overlay="@backAnalyzed?.Overlay"
                                                         DetectedDefects="@backAnalyzed?.DetectedDefects"

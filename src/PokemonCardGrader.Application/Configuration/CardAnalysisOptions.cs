@@ -21,6 +21,13 @@ public sealed class CardAnalysisOptions
     /// <summary>Height of the normalized card image in pixels.</summary>
     public int NormalizedHeight { get; set; } = 880;
 
+    /// <summary>
+    /// JPEG quality (50-100) used when encoding the normalized card image for
+    /// client delivery. Default 85 keeps file size around 60-100 KB while
+    /// preserving the detail needed for centering inspection.
+    /// </summary>
+    public int NormalizedImageJpegQuality { get; set; } = 85;
+
     /// <summary>Derived aspect ratio (width / height).</summary>
     public double CardAspectRatio => CardWidthMm / CardHeightMm;
 

@@ -179,6 +179,11 @@ public sealed class OpenCvImageAnalysisService(
         // ── Step 7: Build overlay data ──
         var overlay = BuildOverlay(cardQuad, src.Width, src.Height, centeringResult.DetectedBorders);
 
+        // ── Step 7b: Encode the rectified card as JPEG so the worker can persist it.
+        //           This is what the client renders as the primary "centering view"
+        //           — the digital equivalent of laying the card under a Luxiv overlay.
+        var normalizedJpeg = EncodeJpeg(normalized, _opts.NormalizedImageJpegQuality);
+
         // ── Step 8: Composite debug image ──
         debugViz.DrawComposite(src, cardQuad, normalized, centeringResult.DetectedBorders,
             allCvDefects, centeringResult.Centering, imageType.ToString().ToLowerInvariant());
@@ -214,7 +219,8 @@ public sealed class OpenCvImageAnalysisService(
             Regions = regions,
             Features = features,
             HybridMlUsed = hybridResult.MlAvailable,
-            HybridMlConfidence = hybridResult.MlConfidence
+            HybridMlConfidence = hybridResult.MlConfidence,
+            NormalizedImageBytes = normalizedJpeg
         };
 
         // Log analysis data for future ML training
@@ -382,6 +388,32 @@ public sealed class OpenCvImageAnalysisService(
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Encodes a Mat as JPEG bytes. Returns null if encoding fails.
+    /// Used to ship the rectified card image back to the client as the primary
+    /// "centering view" — the surface for the digital grading overlay.
+    /// </summary>
+    private static byte[]? EncodeJpeg(Mat image, int quality)
+    {
+        if (image is null || image.Empty())
+            return null;
+
+        try
+        {
+            var qualityClamped = Math.Clamp(quality, 50, 100);
+            var success = Cv2.ImEncode(
+                ".jpg",
+                image,
+                out var buffer,
+                [(int)ImwriteFlags.JpegQuality, qualityClamped]);
+            return success ? buffer : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static ImageAnalysisResult CreateEmptyResult() => new()

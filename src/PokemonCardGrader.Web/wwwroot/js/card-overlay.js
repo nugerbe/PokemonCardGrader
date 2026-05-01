@@ -134,8 +134,14 @@
         this.defects = [];
         this.dismissed = {};
 
-        // Boundary mode: 'detected' | 'manual' | 'default'
+        // Boundary mode: 'detected' | 'manual' | 'default' | 'rectified'
         this._boundaryMode = 'default';
+
+        // Rectified mode: the underlying <img> IS the perspective-corrected card.
+        // The boundary is locked to identity (full-image axis-aligned), corner handles
+        // are hidden, and CSS rotation is suppressed. This is the digital equivalent
+        // of a Luxiv overlay sitting on a physically-flat card.
+        this._rectified = false;
 
         // Percentage guide lines
         this._percentGuidesVisible = false;
@@ -189,7 +195,19 @@
     // ── Data parsing ──
 
     CardOverlay.prototype._parseData = function (data) {
-        if (data && data.boundary && data.boundary.length === 4) {
+        // Rectified mode is sticky for the lifetime of the instance — it only
+        // changes when explicitly toggled via setRectifiedMode. _parseData is
+        // also called from updateData/reset, and we don't want a stale data
+        // payload (e.g. one without the flag) to silently flip the mode off.
+        if (data && data.rectified === true) {
+            this._rectified = true;
+        }
+
+        if (this._rectified) {
+            // Identity quad — the entire image IS the card.
+            this.boundary = [[0, 0], [1, 0], [1, 1], [0, 1]];
+            this._boundaryMode = 'rectified';
+        } else if (data && data.boundary && data.boundary.length === 4) {
             this.boundary = data.boundary.map(function (p) { return [p[0], p[1]]; });
         }
         if (data && data.borders) {
@@ -203,7 +221,7 @@
         if (data && data.defects) {
             this.defects = data.defects;
         }
-        if (data && typeof data.rotation === 'number') {
+        if (data && typeof data.rotation === 'number' && !this._rectified) {
             this._rotation = data.rotation;
         }
     };
@@ -306,6 +324,9 @@
     };
 
     CardOverlay.prototype._autoRotate = function () {
+        // In rectified mode the server has already perspective-corrected the card,
+        // so any further rotation would just skew it back off-axis.
+        if (this._rectified) return;
         if (this._rotation !== 0 || !this.boundary || this._autoRotated) return;
 
         var autoRot = this._computeAutoRotation();
@@ -321,11 +342,16 @@
     };
 
     CardOverlay.prototype._applyRotation = function () {
-        if (this.img) {
-            this.img.style.transform = this._rotation !== 0
-                ? 'rotate(' + this._rotation + 'deg)'
-                : '';
+        if (!this.img) return;
+        // Rectified images are pre-aligned by the server perspective warp.
+        // Forcing CSS rotation on top would visually re-tilt them.
+        if (this._rectified) {
+            this.img.style.transform = '';
+            return;
         }
+        this.img.style.transform = this._rotation !== 0
+            ? 'rotate(' + this._rotation + 'deg)'
+            : '';
     };
 
     // ── Rendering ──
@@ -355,6 +381,9 @@
     // ── 1. Dimmed background (mask outside card) ──
 
     CardOverlay.prototype._drawDimmedBackground = function (ctx, w, h) {
+        // In rectified mode the entire image IS the card, so there's no
+        // "outside the card" region to dim.
+        if (this._rectified) return;
         var pts = this.boundary.map(this._imgToCanvas.bind(this));
 
         ctx.save();
@@ -421,6 +450,9 @@
 
     CardOverlay.prototype._drawCornerHandles = function (ctx) {
         if (!this.boundary) return;
+        // Rectified mode: handles would just sit at the four image corners and
+        // aren't meaningful since the image already represents the rectified card.
+        if (this._rectified) return;
         var pts = this.boundary.map(this._imgToCanvas.bind(this));
 
         ctx.save();
@@ -866,11 +898,14 @@
 
         var px = this._imgToCanvas(normPos);
 
-        // Test corner handles first (higher priority than guide lines)
-        var pts = this.boundary.map(this._imgToCanvas.bind(this));
-        for (var ci = 0; ci < 4; ci++) {
-            if (dist(px, pts[ci]) <= CORNER_HIT) {
-                return 'corner:' + ci;
+        // In rectified mode, corner handles are hidden — only the inner border
+        // guides are draggable (matching a Luxiv-style centering tool).
+        if (!this._rectified) {
+            var pts = this.boundary.map(this._imgToCanvas.bind(this));
+            for (var ci = 0; ci < 4; ci++) {
+                if (dist(px, pts[ci]) <= CORNER_HIT) {
+                    return 'corner:' + ci;
+                }
             }
         }
 
@@ -1103,6 +1138,33 @@
         this._fireCenteringUpdate();
     };
 
+    /**
+     * Toggle rectified mode. When true, the underlying <img> is treated as the
+     * already-rectified card image (server-side perspective warp output) and
+     * the boundary is locked to identity. When false, the boundary returns to
+     * whatever was last set via _parseData / setBoundary.
+     */
+    CardOverlay.prototype.setRectifiedMode = function (rectified) {
+        var wantRectified = !!rectified;
+        if (wantRectified === this._rectified) return;
+
+        this._rectified = wantRectified;
+
+        if (wantRectified) {
+            this.boundary = [[0, 0], [1, 0], [1, 1], [0, 1]];
+            this._boundaryMode = 'rectified';
+            this._rotation = 0;
+            this._autoRotated = true;  // suppress auto-rotate
+        } else {
+            this._autoRotated = false;
+            // Boundary will be repopulated by the next updateData/setBoundary call.
+        }
+
+        this._applyRotation();
+        this._render();
+        this._fireCenteringUpdate();
+    };
+
     CardOverlay.prototype.dispose = function () {
         if (!this.canvas) return;
         this.canvas.removeEventListener('pointerdown', this._onDown);
@@ -1130,7 +1192,10 @@
                 return {
                     updateData: function () { }, dismiss: function () { },
                     undismiss: function () { }, reset: function () { },
-                    setRotation: function () { }, dispose: function () { }
+                    setRotation: function () { }, setRectifiedMode: function () { },
+                    setBoundary: function () { }, setPercentGuides: function () { },
+                    getBoundaryMode: function () { return 'default'; },
+                    dispose: function () { }
                 };
             }
             var instance = new CardOverlay(canvasEl, imgEl, dotNetRef, data);
@@ -1140,6 +1205,7 @@
                 undismiss:        function (i)           { instance.undismiss(i); },
                 reset:            function (d)           { instance.reset(d); },
                 setRotation:      function (deg)         { instance.setRotation(deg); },
+                setRectifiedMode: function (r)           { instance.setRectifiedMode(r); },
                 setBoundary:      function (corners)     { instance.setBoundary(corners); },
                 setPercentGuides: function (vis, pos)    { instance.setPercentGuides(vis, pos); },
                 getBoundaryMode:  function ()            { return instance.getBoundaryMode(); },

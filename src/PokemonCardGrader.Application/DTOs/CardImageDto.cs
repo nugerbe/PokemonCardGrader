@@ -12,4 +12,12 @@ public sealed record CardImageDto
     public AnalysisOverlay? Overlay { get; init; }
     public List<DetectedDefect>? DetectedDefects { get; init; }
     public DateTimeOffset UploadedAt { get; init; }
+
+    /// <summary>
+    /// URL of the rectified (perspective-corrected) card image, when analysis has
+    /// produced one. Used by the centering overlay editor as the primary surface
+    /// for the digital grading template — see <c>ImageOverlayEditor</c>.
+    /// Null until analysis completes successfully.
+    /// </summary>
+    public string? NormalizedImageUrl { get; init; }
 }

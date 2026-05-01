@@ -14,6 +14,14 @@ public sealed class CardImage
     public ImageAnalysisResult? AnalysisResult { get; private set; }
     public DateTimeOffset UploadedAt { get; private set; }
 
+    /// <summary>
+    /// Storage path of the perspective-corrected (rectified) card image produced
+    /// during analysis. When set, the client renders this as the primary view in
+    /// the centering overlay editor — equivalent to the user laying the card flat
+    /// under a transparent grading template. Null until analysis completes.
+    /// </summary>
+    public string? NormalizedStoragePath { get; private set; }
+
     private CardImage() { }
 
     public static CardImage Create(
@@ -38,5 +46,10 @@ public sealed class CardImage
     public void SetAnalysisResult(ImageAnalysisResult result)
     {
         AnalysisResult = result;
+    }
+
+    public void SetNormalizedStoragePath(string? path)
+    {
+        NormalizedStoragePath = string.IsNullOrWhiteSpace(path) ? null : path;
     }
 }

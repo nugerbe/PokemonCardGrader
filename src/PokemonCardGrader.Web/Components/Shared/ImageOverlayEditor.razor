@@ -13,25 +13,42 @@
     </div>
 
     @* Boundary status indicator *@
-    @if (ImmediateMode)
+    @if (ImmediateMode || RectifiedAvailable)
     {
-        <div style="margin-top:6px;display:flex;align-items:center;gap:6px">
-            @switch (_boundaryStatus)
+        <div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            @if (InRectifiedMode)
             {
-                case BoundaryDetectionStatus.AutoDetected:
-                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sage,#22c55e)"></span>
-                    <span style="font-size:11px;color:var(--sage,#22c55e)">Auto-detected</span>
-                    break;
-                case BoundaryDetectionStatus.BackendRefined:
-                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
-                    <span style="font-size:11px;color:var(--accent,#6366f1)">Backend-refined</span>
-                    break;
-                default:
-                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber,#f59e0b)"></span>
-                    <span style="font-size:11px;color:var(--amber,#f59e0b)">Manual adjustment needed</span>
-                    break;
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
+                <span style="font-size:11px;color:var(--accent,#6366f1)">Rectified view</span>
+                <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag the green guides to adjust the inner borders)</span>
             }
-            <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag corners to adjust card boundary)</span>
+            else
+            {
+                @switch (_boundaryStatus)
+                {
+                    case BoundaryDetectionStatus.AutoDetected:
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sage,#22c55e)"></span>
+                        <span style="font-size:11px;color:var(--sage,#22c55e)">Auto-detected</span>
+                        break;
+                    case BoundaryDetectionStatus.BackendRefined:
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent,#6366f1)"></span>
+                        <span style="font-size:11px;color:var(--accent,#6366f1)">Backend-refined</span>
+                        break;
+                    default:
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber,#f59e0b)"></span>
+                        <span style="font-size:11px;color:var(--amber,#f59e0b)">Manual adjustment needed</span>
+                        break;
+                }
+                <span style="font-size:10px;color:var(--ink-4);margin-left:4px">(drag corners to adjust card boundary)</span>
+            }
+
+            @if (RectifiedAvailable)
+            {
+                <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px;margin-left:auto"
+                        @onclick="ToggleViewMode">
+                    @(_showOriginalPhoto ? "Show rectified card" : "View original photo")
+                </button>
+            }
         </div>
     }
 
@@ -53,17 +70,22 @@
                 Guides
             </label>
 
-            <span style="font-size:12px;color:var(--ink-3);flex-shrink:0;margin-left:auto">Rotation</span>
-            <input type="range" class="slider" min="-10" max="10" step="0.1"
-                   value="@_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)"
-                   @oninput="HandleRotationInput"
-                   style="flex:1;min-width:80px;max-width:160px" />
-            <span class="mono" style="font-size:12px;min-width:48px;text-align:right">
-                @(_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))&deg;
-            </span>
-            <button class="btn btn-ghost" style="padding:4px 8px;font-size:11px" @onclick="HandleResetRotation">
-                0&deg;
-            </button>
+            @* Rotation only makes sense on the original photo — the rectified view
+               has already been perspective-corrected server-side. *@
+            @if (!InRectifiedMode)
+            {
+                <span style="font-size:12px;color:var(--ink-3);flex-shrink:0;margin-left:auto">Rotation</span>
+                <input type="range" class="slider" min="-10" max="10" step="0.1"
+                       value="@_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)"
+                       @oninput="HandleRotationInput"
+                       style="flex:1;min-width:80px;max-width:160px" />
+                <span class="mono" style="font-size:12px;min-width:48px;text-align:right">
+                    @(_rotation.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))&deg;
+                </span>
+                <button class="btn btn-ghost" style="padding:4px 8px;font-size:11px" @onclick="HandleResetRotation">
+                    0&deg;
+                </button>
+            }
         </div>
     }
 
@@ -127,6 +149,7 @@
 @code {
     [Parameter] public string ImageUrl { get; set; } = string.Empty;
     [Parameter] public string? LocalImageDataUrl { get; set; }
+    [Parameter] public string? NormalizedImageUrl { get; set; }
     [Parameter] public bool ImmediateMode { get; set; }
     [Parameter] public AnalysisOverlay? Overlay { get; set; }
     [Parameter] public List<DetectedDefect>? DetectedDefects { get; set; }
@@ -155,10 +178,22 @@
     private BoundaryDetectionStatus _boundaryStatus = BoundaryDetectionStatus.Default;
     private AnalysisOverlay? _previousOverlay;
 
-    private string EffectiveImageSrc => LocalImageDataUrl ?? ImageUrl;
+    // ── Rectified-view state ──
+    // When the server has produced a perspective-corrected card image
+    // (NormalizedImageUrl is set), default the editor to that view. The user
+    // can flip back to the original photo to verify detection or adjust corners.
+    private bool _showOriginalPhoto;
+    private string? _previousNormalizedUrl;
+
+    private bool RectifiedAvailable => !string.IsNullOrEmpty(NormalizedImageUrl);
+    private bool InRectifiedMode => RectifiedAvailable && !_showOriginalPhoto;
+
+    private string EffectiveImageSrc =>
+        InRectifiedMode ? NormalizedImageUrl! : (LocalImageDataUrl ?? ImageUrl);
 
     private bool _showControls =>
         ImmediateMode ||
+        InRectifiedMode ||
         (Overlay?.CardBoundary is { Count: 4 } && Overlay.BorderLines is not null);
 
     private object BuildJsData()
@@ -196,7 +231,8 @@
                 bottom = borders.BottomBorderY
             },
             defects,
-            rotation = _rotation
+            rotation = _rotation,
+            rectified = InRectifiedMode
         };
     }
 
@@ -216,6 +252,17 @@
             _previousCardImageId = CardImageId;
             _clientDetectionDone = false;
             _boundaryStatus = BoundaryDetectionStatus.Default;
+            _showOriginalPhoto = false;
+            _previousNormalizedUrl = null;
+            _dataNeedsSync = true;
+        }
+
+        // The rectified image arrives asynchronously after the worker finishes.
+        // When its URL changes (null -> set, or swapped between front/back), we
+        // need to re-sync the JS overlay so it picks up the new src + flag.
+        if (NormalizedImageUrl != _previousNormalizedUrl)
+        {
+            _previousNormalizedUrl = NormalizedImageUrl;
             _dataNeedsSync = true;
         }
 
@@ -234,13 +281,16 @@
         if (firstRender)
         {
             _previousCardImageId = CardImageId;
+            _previousNormalizedUrl = NormalizedImageUrl;
             _dotNetRef = DotNetObjectReference.Create(this);
             _jsInstance = await JS.InvokeAsync<IJSObjectReference>(
                 "cardOverlay.init", _dotNetRef, _canvasRef, _imgRef, BuildJsData());
             _dataNeedsSync = false;
 
-            // In immediate mode, run client-side detection
-            if (ImmediateMode && !_clientDetectionDone)
+            // In immediate mode (local data url, pre-analysis), run client-side
+            // detection — but skip it if the rectified image is already showing,
+            // since detecting a card inside an already-rectified card is a no-op.
+            if (ImmediateMode && !_clientDetectionDone && !InRectifiedMode)
             {
                 await RunClientSideDetection();
             }
@@ -249,8 +299,15 @@
         {
             _dataNeedsSync = false;
 
-            // If backend data arrived, use setBoundary for a refined update
-            if (_boundaryStatus == BoundaryDetectionStatus.BackendRefined &&
+            // Toggle rectified mode FIRST so the boundary lock is in place before
+            // updateData/setBoundary fire. The JS side is idempotent — calling
+            // setRectifiedMode with the same value is a no-op.
+            await _jsInstance.InvokeVoidAsync("setRectifiedMode", InRectifiedMode);
+
+            // If backend data arrived (and we're not in rectified mode), use
+            // setBoundary for a refined update of the photo-view quad.
+            if (!InRectifiedMode &&
+                _boundaryStatus == BoundaryDetectionStatus.BackendRefined &&
                 Overlay?.CardBoundary is { Count: 4 })
             {
                 var corners = Overlay.CardBoundary
@@ -374,6 +431,25 @@
         _rotation = 0;
         if (_jsInstance is not null)
             await _jsInstance.InvokeVoidAsync("setRotation", 0);
+    }
+
+    /// <summary>
+    /// Toggle between the rectified card view (the digital "Luxiv" overlay sitting
+    /// on the perspective-corrected card) and the original photo view (where the
+    /// user can verify the detected card boundary or hand-adjust corners).
+    /// </summary>
+    private void ToggleViewMode()
+    {
+        if (!RectifiedAvailable) return;
+
+        _showOriginalPhoto = !_showOriginalPhoto;
+        // Reset rotation when leaving photo view so it doesn't carry stale state
+        // back into a rectified view later.
+        if (!_showOriginalPhoto)
+        {
+            _rotation = 0;
+        }
+        _dataNeedsSync = true;
     }
 
     // --- Percentage guides ---

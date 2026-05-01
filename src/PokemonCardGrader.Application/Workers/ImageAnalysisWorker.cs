@@ -70,6 +70,31 @@ public sealed class ImageAnalysisWorker(
                 return;
             }
 
+            // Persist the rectified ("Luxiv-flat") view if the analysis produced one.
+            // The path is stored on the entity; the actual JPEG lives alongside
+            // the original upload. Failures here are non-fatal — analysis still
+            // succeeds, the client just falls back to the original photo.
+            if (result.NormalizedImageBytes is { Length: > 0 } bytes)
+            {
+                try
+                {
+                    var normalizedFileName = BuildNormalizedFileName(request.CardImageId);
+                    using var ms = new MemoryStream(bytes, writable: false);
+                    var normalizedPath = await storageService.SaveImageAsync(ms, normalizedFileName, ct);
+                    cardImage.SetNormalizedStoragePath(normalizedPath);
+
+                    logger.LogInformation(
+                        "Persisted rectified card image for {ImageId} at {Path} ({Bytes} bytes).",
+                        request.CardImageId, normalizedPath, bytes.Length);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "Failed to persist rectified image for {ImageId}; client will fall back to original photo.",
+                        request.CardImageId);
+                }
+            }
+
             cardImage.SetAnalysisResult(result);
             await submissionRepository.SaveChangesAsync(ct);
         }
@@ -91,4 +116,7 @@ public sealed class ImageAnalysisWorker(
             "Combined image scores persisted for submission {SubmissionId}.",
             request.CardSubmissionId);
     }
+
+    private static string BuildNormalizedFileName(Guid cardImageId) =>
+        $"{cardImageId:N}_normalized.jpg";
 }

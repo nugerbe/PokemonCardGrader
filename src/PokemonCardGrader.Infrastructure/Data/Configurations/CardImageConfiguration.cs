@@ -11,6 +11,7 @@ public sealed class CardImageConfiguration : IEntityTypeConfiguration<CardImage>
         builder.HasKey(e => e.Id);
         builder.Property(e => e.StoragePath).HasMaxLength(500).IsRequired();
         builder.Property(e => e.FileName).HasMaxLength(255).IsRequired();
+        builder.Property(e => e.NormalizedStoragePath).HasMaxLength(500);
 
         builder.OwnsOne(e => e.AnalysisResult, ar =>
         {
@@ -36,6 +37,10 @@ public sealed class CardImageConfiguration : IEntityTypeConfiguration<CardImage>
                 reg.OwnsOne(r => r.InnerRegion);
             });
             ar.OwnsOne(r => r.Features);
+
+            // Transient — used only between analysis and worker persistence.
+            // Excluding from the JSON column avoids ballooning row size with base64.
+            ar.Ignore(r => r.NormalizedImageBytes);
         });
     }
 }
