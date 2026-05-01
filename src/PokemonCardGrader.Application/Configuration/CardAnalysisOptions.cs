@@ -332,8 +332,15 @@ public sealed class CardAnalysisOptions
     /// <summary>Maximum number of card-like objects before triggering multi-card failure.</summary>
     public int MaxAllowedCards { get; set; } = 1;
 
-    /// <summary>Minimum visible card area fraction to proceed with grading.</summary>
-    public double MinVisibleAreaFraction { get; set; } = 0.85;
+    /// <summary>
+    /// Visible-area fraction below which the FailureDetector flags the card
+    /// as suspicious and applies a confidence penalty (no longer blocking —
+    /// the card detector's own scoring already gates implausible quads).
+    /// "Visible fraction" is computed against an expected fill of 25% of the
+    /// frame, so 0.5 here means the card occupies less than ~12.5% of the
+    /// image — small enough to flag without rejecting the submission.
+    /// </summary>
+    public double MinVisibleAreaFraction { get; set; } = 0.5;
 
     /// <summary>Reflectance ratio threshold for sleeve/top-loader detection.</summary>
     public double SleeveReflectanceThreshold { get; set; } = 0.4;

@@ -100,8 +100,13 @@ public sealed class CardSubmissionRepository(
 
     public void ReattachImageAsModified(CardImage image)
     {
-        db.CardImages.Attach(image);
-        db.Entry(image).State = EntityState.Modified;
+        // db.Update marks the entire entity graph (CardImage + its owned
+        // AnalysisResult) as Modified. Setting State = Modified on the principal
+        // alone is NOT sufficient for owned entities mapped via OwnsOne(...).ToJson():
+        // EF Core only re-serialises the JSON column when the owned entry itself
+        // is in Modified state, so without Update() user corrections to
+        // AnalysisResult silently drop on save.
+        db.CardImages.Update(image);
     }
 
     public async Task<List<CardImage>> GetAnalyzedImagesBySubmissionAsync(Guid submissionId, CancellationToken ct = default)

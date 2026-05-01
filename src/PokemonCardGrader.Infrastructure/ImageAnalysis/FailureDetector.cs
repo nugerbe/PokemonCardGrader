@@ -47,15 +47,21 @@ public sealed class FailureDetector(
             confidence = 0.9;
             logger.LogWarning("No card detected in image.");
         }
-        // Check for occlusion
+        // Occlusion is now a soft warning — the card detector's quad-scoring
+        // (aspect ratio, area, convexity, parallelism, side-length consistency)
+        // already encodes "is this a plausible card?" at score selection time.
+        // A successful high-score detection means we have a quad worth analysing
+        // even if the card sits in a small portion of the frame. We let analysis
+        // proceed and surface lower confidence rather than rejecting outright.
         else if (isOccluded && visibleFraction < _opts.MinVisibleAreaFraction)
         {
-            failureType = "card_occluded";
-            description = $"Card appears partially occluded ({visibleFraction:P0} visible). " +
-                          "Please ensure the full card is visible.";
-            hasBlocking = true;
-            confidence = 0.7;
-            logger.LogWarning("Card occlusion detected: {Fraction:P0} visible", visibleFraction);
+            // Confidence drops with how partial the detection looks. Heavy
+            // occlusion (visibleFraction < 0.4) drops confidence to 0.5;
+            // mild occlusion stays around 0.8.
+            confidence = Math.Clamp(0.5 + visibleFraction * 0.4, 0.5, 0.9);
+            logger.LogInformation(
+                "Card detection looks partial ({Fraction:P0} visible) — proceeding with reduced confidence ({Conf:F2}).",
+                visibleFraction, confidence);
         }
         // Sleeve/top-loader is a warning, not blocking
         else if (isSleeved)
@@ -242,11 +248,17 @@ public sealed class FailureDetector(
 
         var quadArea = Cv2.ContourArea(quad.Select(p => new Point((int)p.X, (int)p.Y)).ToArray());
         var imageArea = src.Width * src.Height;
-        var expectedArea = imageArea * 0.5; // Assume card should fill ~50% of image
 
-        // Check if detected quad is much smaller than expected
+        // Phone photos of a card on a desk typically fill 15-50% of the frame.
+        // Anchor the heuristic at 25% rather than 50% so a normally-framed
+        // photo doesn't get flagged as occluded.
+        const double ExpectedFillFraction = 0.25;
+        var expectedArea = imageArea * ExpectedFillFraction;
+
+        // Check if detected quad is much smaller than expected.
+        // Below 25% of expected (= ~6% of image) is genuinely tiny.
         var areaRatio = quadArea / Math.Max(expectedArea, 1);
-        if (areaRatio < 0.3)
+        if (areaRatio < 0.25)
         {
             return (true, areaRatio);
         }
@@ -266,14 +278,16 @@ public sealed class FailureDetector(
         Cv2.MeanStdDev(cardRegion, out _, out var stddev);
         var cardStdDev = stddev.Val0;
 
-        // Very low variance inside card area suggests major occlusion
-        if (cardStdDev < 15)
+        // Very low variance inside card area suggests major occlusion (e.g., a
+        // hand covering the entire artwork). Pokémon cards always have rich
+        // colour variance from the artwork, so cardStdDev < 12 is a strong signal.
+        if (cardStdDev < 12)
         {
-            return (true, 0.3);
+            return (true, 0.4);
         }
 
         // Card detected within reasonable area
-        var visibleFraction = Math.Min(1.0, quadArea / (imageArea * 0.4));
+        var visibleFraction = Math.Min(1.0, quadArea / (imageArea * ExpectedFillFraction));
         return (visibleFraction < _opts.MinVisibleAreaFraction, visibleFraction);
     }
 }
