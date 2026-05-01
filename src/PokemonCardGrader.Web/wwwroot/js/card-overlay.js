@@ -47,6 +47,11 @@
     const LINE_WIDTH = 2;
     const ACTIVE_LINE_WIDTH = 3;
 
+    // Corner-pair mapping: each corner appears at two indices.
+    // Dragging one must sync the other so lines stay connected.
+    //   TL = 0 ↔ 7,  TR = 1 ↔ 2,  BR = 3 ↔ 4,  BL = 5 ↔ 6
+    const CORNER_PAIR = [7, 2, 1, 4, 3, 6, 5, 0];
+
     // Normalised image-space coordinates: x ∈ [0,1], y ∈ [0,1].
     // Endpoint index → quadrant constraint box (xMin, yMin, xMax, yMax).
     // Mapped pairwise: indices that share a corner share a quadrant.
@@ -310,10 +315,16 @@
         const { set, index } = this._dragging;
         const target = (set === 'outer' ? this.outer : this.inner)[index];
 
+        const points = set === 'outer' ? this.outer : this.inner;
+        const pair = points[CORNER_PAIR[index]];
+
         if (set === 'outer') {
             const box = OUTER_QUADRANT_BOX[index];
             target.x = clamp(np.x, box[0], box[2]);
             target.y = clamp(np.y, box[1], box[3]);
+            // Sync the paired corner endpoint so lines stay connected
+            pair.x = target.x;
+            pair.y = target.y;
             // Re-clamp inner to stay inside outer bbox after outer moves
             this._reclampInner();
         } else {
@@ -321,6 +332,9 @@
             const eps = 0.005;
             target.x = clamp(np.x, ob.minX + eps, ob.maxX - eps);
             target.y = clamp(np.y, ob.minY + eps, ob.maxY - eps);
+            // Sync the paired corner endpoint so lines stay connected
+            pair.x = target.x;
+            pair.y = target.y;
         }
 
         this._render();
